@@ -38,12 +38,31 @@ func newWorktrees(repo string) (*worktrees, error) {
 	if _, err := git(context.Background(), repo, "rev-parse", "--verify", "HEAD"); err != nil {
 		return nil, fmt.Errorf("%s needs to be a git repository with at least one commit: %w", repo, err)
 	}
-	cache, err := os.UserCacheDir()
+	root, err := cacheRoot(repo)
 	if err != nil {
 		return nil, err
 	}
+	return &worktrees{repo: repo, root: root}, nil
+}
+
+// cacheRoot is where the worktrees of repo's runs live.
+func cacheRoot(repo string) (string, error) {
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		return "", err
+	}
 	sum := sha256.Sum256([]byte(repo))
-	return &worktrees{repo: repo, root: filepath.Join(cache, "halo", filepath.Base(repo)+"-"+hex.EncodeToString(sum[:4]))}, nil
+	return filepath.Join(cache, "halo", filepath.Base(repo)+"-"+hex.EncodeToString(sum[:4])), nil
+}
+
+// base returns the branch checked out in the repository, which is what a run's
+// branch gets merged into. It fails on a detached HEAD.
+func (w *worktrees) base(ctx context.Context) (string, error) {
+	b, err := git(ctx, w.repo, "symbolic-ref", "--short", "HEAD")
+	if err != nil || b == "" {
+		return "", fmt.Errorf("%s has a detached HEAD; check out a branch first: %w", w.repo, err)
+	}
+	return b, nil
 }
 
 // runBranch creates the run's integration branch at HEAD and its worktree.
@@ -117,4 +136,117 @@ func merge(ctx context.Context, runDir, branch, message string) (conflicts strin
 		return "", err
 	}
 	return files, nil
+}
+
+// Land merges the run's branch into base without leaving the user's checkout in a
+// broken state. If base is checked out in repo, it makes a merge commit there (and
+// refuses when tracked files have uncommitted changes); otherwise it only
+// fast-forwards base. It returns a short summary of what was merged.
+func Land(ctx context.Context, repo, runBranch, base string) (string, error) {
+	current, _ := git(ctx, repo, "symbolic-ref", "--short", "HEAD")
+	if current != base {
+		if _, err := git(ctx, repo, "merge-base", "--is-ancestor", base, runBranch); err != nil {
+			return "", fmt.Errorf("%s is not checked out and cannot be fast-forwarded to %s; merge %s by hand", base, runBranch, runBranch)
+		}
+		old, err := git(ctx, repo, "rev-parse", "--short", base)
+		if err != nil {
+			return "", err
+		}
+		if _, err := git(ctx, repo, "update-ref", "refs/heads/"+base, runBranch); err != nil {
+			return "", err
+		}
+		stat, _ := git(ctx, repo, "diff", "--shortstat", old, base)
+		return fmt.Sprintf("fast-forwarded %s %s..%s: %s", base, old, shortRev(ctx, repo, runBranch), stat), nil
+	}
+
+	if dirty, err := git(ctx, repo, "status", "--porcelain", "--untracked-files=no"); err != nil {
+		return "", err
+	} else if dirty != "" {
+		return "", fmt.Errorf("%s has uncommitted changes to tracked files; commit or stash them, then land %s:\n%s", repo, runBranch, dirty)
+	}
+	before, err := git(ctx, repo, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	_, err = git(ctx, repo, "-c", "user.name=halo", "-c", "user.email=halo@localhost", "merge", "--no-ff", "-m", "halo: merge "+runBranch, runBranch)
+	if err != nil {
+		files, _ := git(ctx, repo, "diff", "--name-only", "--diff-filter=U")
+		_, _ = git(ctx, repo, "merge", "--abort")
+		if files != "" {
+			return "", fmt.Errorf("merging %s into %s conflicts in: %s (merge aborted, %s is unchanged)", runBranch, base, strings.ReplaceAll(files, "\n", ", "), base)
+		}
+		return "", err
+	}
+	after, err := git(ctx, repo, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	if after == before {
+		return base + " already contains " + runBranch, nil
+	}
+	stat, _ := git(ctx, repo, "diff", "--shortstat", before, after)
+	return fmt.Sprintf("merged %s into %s as %s: %s", runBranch, base, shortRev(ctx, repo, "HEAD"), stat), nil
+}
+
+func shortRev(ctx context.Context, repo, rev string) string {
+	out, err := git(ctx, repo, "rev-parse", "--short", rev)
+	if err != nil {
+		return rev
+	}
+	return out
+}
+
+// Cleanup removes what run short left behind: its worktrees, its branches
+// (halo/<short> and halo/<short>-*) and its cache directory. Call it only after Land
+// succeeded.
+func Cleanup(ctx context.Context, repo, short string) error {
+	if short == "" || strings.ContainsAny(short, `/\`) || short == "." || short == ".." {
+		return fmt.Errorf("invalid run id %q", short)
+	}
+	root, err := cacheRoot(repo)
+	if err != nil {
+		return err
+	}
+	runDir := filepath.Join(root, short)
+	resolve := func(p string) string {
+		if r, err := filepath.EvalSymlinks(p); err == nil {
+			return r
+		}
+		return p
+	}
+	prefix := resolve(runDir) + string(filepath.Separator)
+
+	list, err := git(ctx, repo, "worktree", "list", "--porcelain")
+	if err != nil {
+		return err
+	}
+	var errs []string
+	for _, line := range strings.Split(list, "\n") {
+		path, ok := strings.CutPrefix(line, "worktree ")
+		if !ok || !strings.HasPrefix(resolve(path)+string(filepath.Separator), prefix) {
+			continue
+		}
+		if _, err := git(ctx, repo, "worktree", "remove", "--force", path); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+	if _, err := git(ctx, repo, "worktree", "prune"); err != nil {
+		errs = append(errs, err.Error())
+	}
+	branches, err := git(ctx, repo, "for-each-ref", "--format=%(refname:short)", "refs/heads/halo/"+short, "refs/heads/halo/"+short+"-*")
+	if err != nil {
+		return err
+	}
+	for _, b := range strings.Fields(branches) {
+		if _, err := git(ctx, repo, "branch", "-D", b); err != nil {
+			errs = append(errs, err.Error())
+		}
+	}
+	if err := os.RemoveAll(runDir); err != nil {
+		errs = append(errs, err.Error())
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("cleanup of run %s: %s", short, strings.Join(errs, "; "))
+	}
+	return nil
 }
