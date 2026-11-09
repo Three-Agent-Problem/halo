@@ -1,90 +1,143 @@
-# Halo
+<div align="center">
 
-Type one prompt. A lead agent (Claude Code on Opus) turns it into a plan. Workers on haiku, sonnet and opus build the pieces in their own git worktrees. A reviewer checks them, and the lead merges them into a run branch, which halo then merges into the branch you started from. You watch it all live in a terminal UI: the plan, each agent's tool calls, and the agents talking to each other.
+# ◉ Halo
 
-Every message goes through a [Lagrange](https://github.com/three-agent-problem/lagrange) server as an A2A task, so every run is also a Lagrange run you can replay in its web app.
+**One prompt in. A team of Claude Code agents plans it, builds it, reviews it and merges it, while you watch every message live in your terminal.**
+
+A halo orbit circles a Lagrange point. Halo's agents circle a [Lagrange](https://github.com/three-agent-problem/lagrange) server: every message between them is an [A2A](https://a2a-protocol.org) task you can watch, answer and replay.
+
+[Step-by-step guide](docs/guide.md) · [Panels and keys](#panels-and-keys) · [How a run goes](#how-a-run-goes) · [Findings](FINDINGS.md)
+
+![Halo in the middle of a run: the plan on the left, every message orbiting Lagrange in the middle, the reviewer's live output on the right, agent-to-agent comms below](docs/screenshots/overview.png)
+
+</div>
+
+## What happens when you press enter
 
 ```
- you ── halo (TUI) ──A2A──▶  Lagrange  ◀──tunnels── halo agents
-          ▲  /api/events       │                    ├─ @halo-lead      opus, plans and coordinates (read-only)
-          └────────────────────┘                    ├─ @halo-haiku-1   workers, each subtask in its own worktree
-                                                    ├─ @halo-sonnet-1
-                                                    └─ @halo-reviewer  APPROVE / CHANGES, never edits
+ you ── halo (TUI) ──A2A──▶  Lagrange  ◀──tunnels── the team (hosted by halo)
+          ▲  /api/events       │                    ├─ @halo-lead      opus: asks, plans, delegates, merges (never edits)
+          └────────────────────┘                    ├─ @halo-haiku-1   workers: one git worktree per subtask
+                                                    ├─ @halo-sonnet-1  ...
+                                                    ├─ @halo-opus-1    ...
+                                                    └─ @halo-reviewer  APPROVE / CHANGES (never edits)
 ```
 
-## Try the TUI without a server
+1. **The lead asks first, if it has to.** An ambiguous goal gets up to four multiple-choice questions, like Claude Code's plan mode.
+2. **You approve a plan.** It shows subtasks, models and dependencies. Nothing runs before you say yes, in the TUI, in Lagrange's inbox, or from an email or Slack link on your phone.
+3. **Workers build in parallel.** Each works in its own git worktree of a run branch: cheap work goes to haiku, real work to sonnet, the hard parts to opus.
+4. **A reviewer reads every diff.** CHANGES sends the subtask back to the same worker in the same Claude session. A failure escalates it one model up (haiku → sonnet → opus).
+5. **It lands on your branch.** When every subtask is merged, Halo merges the run into the branch you started from and cleans up its worktrees.
+
+The whole time, every message goes through Lagrange, so the run is also a Lagrange run: open its web app to replay it step by step, see each HTTP exchange, or answer the lead from another device.
+
+## Try it in 10 seconds (no server, no agents)
 
 ```sh
-go build -o halo ./cmd/halo && ./halo --demo
+go install github.com/three-agent-problem/halo/cmd/halo@latest
+halo --demo
 ```
+
+The demo plays a scripted run: questions, a plan to approve, five subtasks, a failed haiku escalated to sonnet, review rounds, merges. Press `a` to answer, `+` to grow a panel, `?` for every key.
 
 ## Run it for real
 
-You need a Lagrange server and an API key (Settings → API keys), plus Claude Code and its ACP adapter: `npm i -g @agentclientprotocol/claude-agent-acp`.
+**→ Follow [the step-by-step guide](docs/guide.md).** It goes from nothing to a merged run in about 10 minutes and shows what you should see at every step. The short version:
 
 ```sh
-cd your-repo      # a git repo with at least one commit
-halo              # first run asks for the server and the key
+# 1. a Lagrange server (Docker)
+git clone https://github.com/three-agent-problem/lagrange && cd lagrange
+cp .env.example .env            # set LAGRANGE_PUBLIC_URL=http://localhost:8080 and the admin account
+docker compose up -d            # http://localhost:8080
+
+# 2. Claude Code (logged in once) and its ACP adapter, then Halo
+npm i -g @agentclientprotocol/claude-agent-acp
+go install github.com/three-agent-problem/halo/cmd/halo@latest
+
+# 3. an API key: Lagrange → Settings → API keys → Create key
+
+# 4. go
+cd ~/code/your-repo && halo      # asks for the server and the key once, then hosts the team
 ```
 
-- **Halo hosts the team itself.** It starts the lead, the workers and the reviewer, and they work on the repository you started it in.
-  - Quitting while a run is in flight asks first, because the agents stop with Halo.
-  - **One team, one host.** If the team is already online in another Halo, this one opens watch-only. Use `halo -watch` to watch on purpose.
-  - `halo agents` still runs the team headless, for hosting it on another machine.
-- **The team is global.** It lives in `~/Library/Application Support/halo/roster.yaml` and you edit it in panel 7. A `halo.yaml` in a repository overrides it for that repository only.
-- **Halo opens with an empty screen.** The plan panel offers your last run, and `/resume` reopens any past run: its whole history loads at once, and your next prompt continues that conversation, so the lead remembers it. Claude sessions are saved to disk, so this works across restarts too.
+## Screens
 
-**The agents run Claude Code without asking per tool call.**
-- Workers may do anything inside their own worktree; the reviewer and the lead may not edit files.
-- The worktrees live outside your repo, in `~/Library/Caches/halo/<repo>-<hash>/`.
-- When every subtask is merged, Halo merges the run into the branch you have checked out, then deletes its worktrees and branches.
+| | |
+|---|---|
+| ![The lead's questions as a form](docs/screenshots/questions.png) | ![The plan as a kanban](docs/screenshots/kanban.png) |
+| **Questions first.** Pick an option, or write your own. Lagrange's inbox, email and Slack show the same questions as text. | **`1` `+`: the plan grows into a kanban.** It shows each worker's live line, diff stats and review rounds (`r2`). `↑` marks an escalation. |
+| ![The run's commits as a graph](docs/screenshots/commits.png) | ![Every key, searchable](docs/screenshots/help.png) |
+| **`5` `+`: the commit graph, live.** One lane per subtask branch, colored by model, with merges as `◆`. `enter` opens the diff. | **`?`: every key, searchable.** Type to narrow it down. |
+
+![The plan at full size: a timeline with a lane per agent](docs/screenshots/timeline.png)
+<sub>**`1` `+` `+` `+`: the plan at full size** is a timeline with a lane per agent: working, in review, waiting on you, and what each one does now.</sub>
 
 ## Panels and keys
 
-Like lazygit: every panel has a number and `enter` opens the selected item. `+` grows the focused panel into the space next to it: first its whole column (the panels above and below collapse to one-line bars), then the orbit's width too, then the whole screen. `-` below normal collapses a panel to a one-line bar with a summary, which stays closed while you cycle with `tab`; one `+` brings it back. Moving the focus puts grown panels back to normal. The orbit and comms never collapse.
+It works like lazygit: every panel has a number, and `enter` opens the selected item. `+` grows the focused panel in steps: first its whole column (the panels above and below collapse to one-line bars), then the orbit's width too, then the whole screen. `-` shrinks it, and below normal size the panel collapses to a one-line bar. Moving the focus puts grown panels back to normal size.
 
 | Panel | Shows | `enter` opens |
 |---|---|---|
-| `1` plan | subtasks, models, progress and what each running worker does now; grown: a kanban (pending · running · waiting · done, `h`/`l` `j`/`k` move); full: a timeline with a lane per agent and a NOW list | the subtask: status, attempts, its commits and every message about it |
-| `2` orbit | every message travelling through Lagrange | (grows it) |
-| `3` agent | live: the agent's raw Claude Code output (thinking, messages, each tool call with its output); `v` switches to the tool calls Lagrange saw, `h`/`l` switch agents | the whole entry: a tool call's input and full output |
-| `4` comms | agent ⇄ agent messages, wrapped (`f` filters by agent) | the whole message |
-| `5` commits | the run's commits as a branch graph, live: one lane per subtask branch, colored by its worker's model, merges as `◆`; grown: stats, refs, a legend | the diff (`[` `]` previous/next) |
-| `6` events | the raw Lagrange activity feed | the entry as JSON |
-| `7` roster | the team, with each agent's cost and context fill (Claude Code's estimate at API prices; the team total is in the title); `n` add · `m` model · `d d` remove · `R` restart; grown: tokens and cost per session | (watch that agent in 3) |
-| `8` shells | every command the agents run and every server they leave up, with its ports; `o` opens the port, `d d` stops it and its children | the live output, command, cwd and ports |
+| `1` plan | Subtasks, models, progress, and what each running worker is doing now. Grown: a kanban. Full size: a timeline per agent. | The subtask: status, attempts, commits and every message about it. |
+| `2` orbit | Every message travelling through Lagrange. | (grows it) |
+| `3` agent | The agent's raw Claude Code output: thinking, messages and tool calls with their output. `v` switches to the tool calls Lagrange saw, and `h`/`l` switch agents. | A tool call's full input and output. |
+| `4` comms | Agent ⇄ agent messages. `f` filters by agent. | The whole message. |
+| `5` commits | The run's commits as a live branch graph. | The diff (`[` `]` previous/next). |
+| `6` events | The raw Lagrange activity feed. | The entry as JSON. |
+| `7` roster | The team, with each agent's cost and context fill. `n` adds an agent, `m` changes its model, `d d` removes it and `R` restarts it. | (watches that agent in `3`) |
+| `8` shells | Every command the agents run and every server they leave up, with its ports. `o` opens a port, and `d d` stops a command and its children. | Live output, command, cwd and ports. |
 
 | Key | Does |
 |---|---|
-| `1`–`8`, `tab` | focus a panel |
-| `+` / `-` | grow / shrink it: bar → normal → column → wide → full |
-| `j` `k` `g` `G` `ctrl+d` `ctrl+u` | move, scroll |
-| `enter` / `esc` | open / back |
-| `i` | prompt the lead |
-| `/` | commands: `/clear` (start fresh), `/resume` (reopen a past run), `/merge` (land the run now), `/agents`, `/help` |
-| `a` | answer what waits on you: `y` approve, `n` reject, `r` reply; the lead's multiple-choice questions open as a form |
-| `ctrl+v` | while typing a prompt, message or answer: paste the clipboard's image (a screenshot), or drag an image file in; it shows as `[img1 shot.png]` and reaches the agent as a file path (copied next to Halo's state) that Claude Code opens with Read |
-| `x` | in the plan or agent panel: stop that running subtask's worker (asks y/n; the lead then asks you what next); elsewhere `x` `x` cancels the run |
-| (ping) | when something new waits on you and the terminal isn't focused, Halo sends a desktop notification (OSC 9: iTerm2, Ghostty, WezTerm, kitty) and a bell; `notify: false` in `halo.yaml` turns it off |
-| `?` | every key; type to search |
-| `q` | quit |
+| `1`–`8`, `tab` | Focus a panel. |
+| `+` / `-` | Grow or shrink it: bar → normal → column → wide → full. |
+| `j` `k` `g` `G` `ctrl+d` `ctrl+u` | Move and scroll. |
+| `enter` / `esc` | Open / go back. |
+| `i` | Prompt the lead. |
+| `a` | Answer what is waiting on you: `y` approves, `n` rejects, `r` replies. The lead's multiple-choice questions open as a form. |
+| `/` | Commands: `/clear` starts fresh, `/resume` reopens a past run, `/merge` lands the run now, plus `/agents` and `/help`. |
+| `ctrl+v` | While typing: paste a screenshot from the clipboard, or drag in an image file. |
+| `x` | In the plan or agent panel: stop that subtask's worker (asks y/n first). Elsewhere, `x` `x` cancels the run. |
+| `?` | Every key. Type to search. |
+| `q` | Quit. If a run is in flight, it asks first, because the agents stop with Halo. |
+
+When something new waits on you and the terminal isn't focused, Halo sends a desktop notification (OSC 9, in iTerm2, Ghostty, WezTerm or kitty) and rings the bell. `notify: false` in `halo.yaml` turns this off.
 
 ## How a run goes
 
-The lead has only MCP tools to orchestrate with. Each tool call is a Lagrange task, and Halo enforces the rules in Go:
+The lead orchestrates only through MCP tools. Each tool call is a Lagrange task, and Halo enforces the rules in Go, not in the prompt:
 
-0. **Questions, only if needed:** when your request is ambiguous in a way that changes the plan, the lead first calls `ask_human` with `questions`: up to 4 multiple-choice questions (pick one, or pick any), like Claude Code's plan mode. `a` opens them as a form; you can always write your own answer instead. Clients that don't know the form (the web inbox, email) get the same questions as text.
-1. **`publish_plan`:** the lead publishes the goal and subtasks (id, spec, acceptance, model, deps). The plan streams to the TUI as the `halo.plan` artifact.
-2. **`ask_human`:** the lead asks you to approve. It shows in the TUI and in your Lagrange inbox, and reaches your phone by email or Slack. No subtask starts before you approve.
-3. **`delegate`:** sends a subtask whose dependencies are merged to the least busy worker of its model, in a fresh worktree of the run branch.
-4. **`wait_events`:** the lead hears about each of these and reacts:
-   - worker questions (`ask_lead`, answered with `answer`);
-   - finished or failed subtasks;
-   - reviews;
-   - merge conflicts;
-   - your answers.
-5. **`request_review`:** the reviewer sees the diff. On APPROVE, the subtask is merged into the run branch. On CHANGES, the lead uses **`follow_up`** to send it back to the same worker, in the same Claude session. A subtask gets at most 2 review rounds.
-6. **`escalate`:** moves a failed subtask one model up (haiku → sonnet → opus) and retries it.
-7. **`halo merge`:** once all subtasks are merged, halo merges `halo/<run>` into the branch you started from. If that fails, `halo merge <run>` retries it later; `halo merge` alone lists runs.
+| Tool | What it does |
+|---|---|
+| `ask_human` | Asks you something: up to 4 multiple-choice `questions`, or a plan approval. It shows in the TUI and in your Lagrange inbox, and reaches your phone by email or Slack. |
+| `publish_plan` | The goal and the subtasks (id, spec, acceptance, model, deps). The plan streams to the TUI as the `halo.plan` artifact. |
+| `delegate` | Sends a subtask whose dependencies are merged to the least busy worker of its model, in a fresh worktree of `halo/<run>`. |
+| `wait_events` | Waits for what happened: worker questions (`ask_lead`, answered with `answer`), finished or failed subtasks, reviews, merge conflicts, your answers. |
+| `request_review` | The reviewer reads the diff. APPROVE merges the subtask into the run branch. CHANGES leads to `follow_up`: the same worker, in the same Claude session, for at most 2 rounds. |
+| `escalate` | Retries a failed subtask one model up. |
 
-Lagrange gaps found along the way are in [FINDINGS.md](FINDINGS.md).
+Once every subtask is merged, Halo merges `halo/<run>` into the branch you started from. If that fails, `halo merge <run>` retries it later, and `halo merge` on its own lists runs.
+
+## Good to know
+
+- **The agents run Claude Code without asking per tool call.** Workers may do anything inside their own worktree. The lead and the reviewer can't edit files. The worktrees live outside your repo, in `~/Library/Caches/halo/<repo>-<hash>/`.
+- **One team, one host.** The team is global (`~/Library/Application Support/halo/roster.yaml`, edited in panel 7). A `halo.yaml` in a repository overrides it for that repository only. If the team is already online in another Halo, this one opens watch-only. `halo -watch` watches on purpose, and `halo agents` runs the team headless on another machine.
+- **Runs persist.** `/resume` reopens any past run with its whole history, and your next prompt continues that conversation, so the lead remembers it, even across restarts.
+- **Cost.** Every agent is a real Claude Code session on your account. The roster shows each one's cost (Claude Code's estimate at API prices).
+
+| Command | |
+|---|---|
+| `halo` | The TUI. It hosts the team on this repository unless another Halo already does. |
+| `halo --demo` | A scripted run, with no server needed. |
+| `halo -watch` | Watch only. |
+| `halo init --server URL --key lgk_…` | Save the server and key, and create the addresses, without opening the TUI. |
+| `halo agents` | Run the team headless. |
+| `halo merge [run] [--keep]` | List finished runs, or merge one into the checked-out branch. |
+
+## Built on
+
+[Lagrange](https://github.com/three-agent-problem/lagrange) (addresses, tunnels, mailboxes, the inbox and runs), [a2a-go](https://github.com/a2aproject/a2a-go) (A2A and its ACP executor), [Claude Code](https://claude.com/claude-code) over the [Agent Client Protocol](https://agentclientprotocol.com), and [Bubble Tea](https://github.com/charmbracelet/bubbletea).
+
+Halo is also Lagrange's dogfood: every gap it hits is written down, with a repro, in [FINDINGS.md](FINDINGS.md).
+
+Apache 2.0.
