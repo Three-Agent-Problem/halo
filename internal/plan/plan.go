@@ -40,10 +40,12 @@ func Next(model string) (string, bool) {
 
 // Plan is a run's plan.
 type Plan struct {
-	Goal     string     `json:"goal"`
-	Branch   string     `json:"branch,omitempty"`
-	Approved bool       `json:"approved,omitempty"`
-	Subtasks []*Subtask `json:"subtasks"`
+	Goal     string `json:"goal"`
+	Branch   string `json:"branch,omitempty"`
+	Approved bool   `json:"approved,omitempty"`
+	// MergedInto is the base branch the run branch was merged into.
+	MergedInto string     `json:"merged_into,omitempty"`
+	Subtasks   []*Subtask `json:"subtasks"`
 }
 
 // Subtask is one piece of the plan.
