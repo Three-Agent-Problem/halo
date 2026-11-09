@@ -33,8 +33,21 @@ func demoState() *State {
 func playDemo(t *testing.T, ctx context.Context, mu *sync.Mutex) (*model, *Demo) {
 	t.Helper()
 	d := &Demo{Human: "kaan", Prefix: "halo"}
-	m := newModel(context.Background(), Options{Backend: d, State: demoState(), Server: "localhost:8190"})
+	m := newModel(context.Background(), Options{Backend: d, State: demoState(), Server: "localhost:8190", Procs: d})
 	m.connected, m.online = true, 6
+	feed := d.Updates()
+	go func() {
+		for {
+			select {
+			case u := <-feed:
+				mu.Lock()
+				m.st.Feed(u)
+				mu.Unlock()
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
 	go d.Stream(ctx, func(e lg.Entry) { mu.Lock(); m.st.Apply(e, time.Now()); mu.Unlock() }, func(bool, error) {})
 	return m, d
 }
@@ -45,6 +58,10 @@ func syncDemo(m *model, d *Demo) {
 	m.st.SetCommits(cs)
 	for _, c := range cs {
 		m.ui.Diffs[c.SHA], _ = d.Diff(context.Background(), c.SHA)
+	}
+	m.st.Shells, _ = d.Shells(context.Background())
+	for _, sh := range m.st.Shells {
+		m.ui.Out[sh.PID], _ = d.Output(context.Background(), sh.Out)
 	}
 }
 
@@ -213,7 +230,12 @@ func TestSnapshot(t *testing.T) {
 	defer cancel()
 	m, d := playDemo(t, ctx, &mu)
 	end := time.Now().Add(time.Duration(secs) * time.Second)
+	// HALO_SNAP_UNTIL=port waits (up to the deadline) for a shell with a port.
+	until := os.Getenv("HALO_SNAP_UNTIL")
 	for time.Now().Before(end) {
+		if ss, _ := d.Shells(ctx); until == "port" && len(ss) > 0 && len(ss[len(ss)-1].Ports) > 0 && time.Since(ss[len(ss)-1].Started) > 6*time.Second {
+			break
+		}
 		time.Sleep(80 * time.Millisecond)
 		mu.Lock()
 		m.st.Prune(time.Now())
@@ -236,6 +258,10 @@ func TestSnapshot(t *testing.T) {
 	for _, k := range strings.Fields(os.Getenv("HALO_SNAP_KEYS")) {
 		if k == "?" {
 			m.ui.Help = true
+			continue
+		}
+		if name, ok := strings.CutPrefix(k, "@"); ok {
+			m.st.Focus, m.st.manualFocus = "halo-"+name, time.Now().Add(time.Hour)
 			continue
 		}
 		if q, ok := strings.CutPrefix(k, "?"); ok {

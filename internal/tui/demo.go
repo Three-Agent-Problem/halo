@@ -27,6 +27,10 @@ type Demo struct {
 	answer  chan string
 	commits []Commit
 	diffs   map[string]string
+	feed    chan Update
+	shells  []Shell
+	outs    map[string]string
+	pid     int
 }
 
 type demoTask struct{ parent, from, to string }
@@ -170,8 +174,12 @@ func (d *Demo) art(id, artID, name, content string, appendIt bool) {
 // work plays a worker's tool calls over about d.
 func (d *Demo) work(ctx context.Context, id string, tools []string, total time.Duration) {
 	step := total / time.Duration(len(tools)+1)
+	d.mu.Lock()
+	agent := d.tasks[id].to
+	d.mu.Unlock()
 	for _, t := range tools {
-		sleep(ctx, step+time.Duration(rand.IntN(400))*time.Millisecond)
+		sleep(ctx, step/3)
+		d.tool(ctx, agent, id, t, step*2/3+time.Duration(rand.IntN(400))*time.Millisecond)
 		d.state(id, "TASK_STATE_WORKING", "Finished "+t)
 		if rand.IntN(2) == 0 {
 			d.art(id, id+"-r", "", "…", true)
@@ -180,6 +188,10 @@ func (d *Demo) work(ctx context.Context, id string, tools []string, total time.D
 }
 
 func (d *Demo) reply(id, text string) {
+	d.mu.Lock()
+	agent := d.tasks[id].to
+	d.mu.Unlock()
+	d.chunk(agent, id, "agent_message_chunk", text)
 	words := strings.Fields(text)
 	for i := 0; i < len(words); i += 4 {
 		d.art(id, id+"-r", "response", strings.Join(words[i:min(i+4, len(words))], " ")+" ", i > 0)
@@ -238,6 +250,11 @@ func (d *Demo) run(ctx context.Context) {
 	}
 
 	d.task(root, "", d.Human, lead, "add a postgres task store with /api/tasks routes, a web form and tests")
+	d.chunk(lead, root, "user_message_chunk", "add a postgres task store with /api/tasks routes, a web form and tests")
+	d.chunk(lead, root, "agent_thought_chunk", "The store interface already exists in store/store.go, so the work splits cleanly: a migration first, then the store and the routes in parallel, then the form.")
+	d.raw(lead, root, map[string]any{"sessionUpdate": "plan", "entries": []map[string]string{
+		{"content": "Read the store and platform API", "status": "in_progress"}, {"content": "Publish a plan of 5 subtasks", "status": "pending"},
+		{"content": "Delegate and review each subtask", "status": "pending"}, {"content": "Merge the run branch", "status": "pending"}}})
 	d.work(ctx, root, []string{"Read README.md", "Glob **/*.go", "Read store/store.go", "mcp__halo__publish_plan"}, 3*time.Second)
 	publish()
 	sleep(ctx, time.Second)
@@ -317,6 +334,9 @@ func (d *Demo) run(ctx context.Context) {
 	st4.Model, st4.Escalated, st4.Attempts = "sonnet", true, 2
 	publish()
 	t4b := dispatch("S4", s2, "web form; haiku failed on empty-title validation, see its branch")
+	stopDev := make(chan struct{})
+	defer close(stopDev)
+	go d.devServer(ctx, s2, t4b, stopDev)
 	d.work(ctx, t4b, []string{"Read web/src/TaskForm.tsx", "Read api/tasks.go", "Edit web/src/TaskForm.tsx", "Bash npm test"}, 5*time.Second)
 	d.commit("halo: S4 web task form", "web/src/TaskForm.tsx", "web/src/TaskForm.test.tsx")
 	d.reply(t4b, "The form validates with the API's schema. 31 tests pass.")

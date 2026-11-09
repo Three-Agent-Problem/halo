@@ -48,8 +48,10 @@ type Agent struct {
 	Log     []string
 	Since   time.Time
 	LastAct time.Time
-	active  map[string]bool // tasks in progress
-	asking  map[string]bool // questions it sent that aren't answered
+	Feed    []*Block          // the live transcript, for agents this Halo hosts
+	tools   map[string]*Block // Feed's tool calls by id
+	active  map[string]bool   // tasks in progress
+	asking  map[string]bool   // questions it sent that aren't answered
 }
 
 func (a *Agent) refresh() {
@@ -154,6 +156,8 @@ type State struct {
 	Pin string
 	// Hint is shown while there is no run, e.g. how to resume the last one.
 	Hint string
+	// Shells are the processes the hosted agents run.
+	Shells []Shell
 
 	Focus       string
 	focusAt     time.Time

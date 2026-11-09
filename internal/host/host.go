@@ -5,8 +5,10 @@ package host
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -17,13 +19,31 @@ import (
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
+	"github.com/a2aproject/a2a-go/v2/integrations/executor/a2aacp"
 	"github.com/three-agent-problem/lagrange/client"
 	"github.com/three-agent-problem/lagrange/delegate"
 	"github.com/three-agent-problem/lagrange/tunnel"
 
 	"github.com/three-agent-problem/halo/internal/config"
 	"github.com/three-agent-problem/halo/internal/lg"
+	"github.com/three-agent-problem/halo/internal/shells"
 )
+
+// agent is how an agent's Claude Code process starts: under a marker sh, so the
+// TUI can find its shells, and with long MCP tool calls allowed.
+func (h *Host) agent(handle string, logw io.Writer) a2aacp.Process {
+	return a2aacp.Process{Argv: shells.Wrap(handle, strings.Fields(h.cfg.ACP)), Dir: h.cfg.Repo, Stderr: logw,
+		Env: append(os.Environ(), "MCP_TOOL_TIMEOUT=1800000")}
+}
+
+// tap reports every session update of an agent (thoughts, messages, tool calls
+// with their output) to notify, then converts it as usual.
+func (h *Host) tap(handle string) a2aacp.Converter {
+	return a2aacp.ConverterFunc(func(ctx context.Context, ec *a2asrv.ExecutorContext, u a2aacp.Update) (*a2aacp.ConverterResult, error) {
+		h.notify(Event{Kind: "acp", Agent: handle, Text: u.Type, Task: string(ec.TaskID), Data: append(json.RawMessage(nil), u.Raw...)})
+		return a2aacp.ConvertUpdate(ctx, ec, u)
+	})
+}
 
 // Provision creates the roster's addresses that don't exist yet and saves a token
 // for each.
@@ -69,6 +89,7 @@ type Host struct {
 	// sessions remembers Claude sessions on disk, so a restarted Halo continues
 	// them (when the agent supports session/load).
 	sessions *sessionFile
+	notify   func(Event)
 
 	mu      sync.Mutex
 	workers map[string]*worker // by handle, the reviewer included
@@ -78,9 +99,11 @@ type Host struct {
 // Event is something the running roster reports: an agent connected, where the
 // logs are, an error.
 type Event struct {
-	Kind  string // "start", "online", "error"
-	Agent string // the handle, for "online"
-	Text  string
+	Kind  string          // "start", "online", "error", "acp"
+	Agent string          // the handle, for "online" and "acp"
+	Text  string          // for "acp", the session update type
+	Task  string          // for "acp", the A2A task the agent works on
+	Data  json.RawMessage // for "acp", the session update as the agent sent it
 }
 
 // Print is a notify func for a terminal: one line per event.
@@ -127,8 +150,8 @@ func Run(ctx context.Context, cfg *config.Config, st *config.State, notify func(
 	}
 	defer logFile.Close()
 	h := &Host{cfg: cfg, st: st, api: api, wt: wt, workers: map[string]*worker{}, busy: map[string]int{},
-		sessions: openSessions(filepath.Join(wt.root, "sessions.json")),
-		log:      slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{Level: slog.LevelInfo}))}
+		sessions: openSessions(filepath.Join(wt.root, "sessions.json")), notify: notify,
+		log: slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{Level: slog.LevelInfo}))}
 
 	// The MCP server the agents' Claude sessions call.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")

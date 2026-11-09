@@ -47,15 +47,16 @@ Like lazygit: every panel has a number. `+` grows the focused panel to half the 
 |---|---|---|
 | `1` plan | subtasks, models, progress; grown: deps, worker, notes | the subtask: status, attempts, its commits and every message about it |
 | `2` orbit | every message travelling through Lagrange | (grows it) |
-| `3` agent | the focused agent's tool calls (`h`/`l` switch agents) | its latest task and whole answer |
+| `3` agent | live: the agent's raw Claude Code output (thinking, messages, each tool call with its output); `v` switches to the tool calls Lagrange saw, `h`/`l` switch agents | the whole entry: a tool call's input and full output |
 | `4` comms | agent ⇄ agent messages, wrapped (`f` filters by agent) | the whole message |
 | `5` commits | the run's commits, live | the diff (`[` `]` previous/next) |
 | `6` events | the raw Lagrange activity feed | the entry as JSON |
 | `7` roster | the team; `n` add · `m` model · `d d` remove · `R` restart | (watch that agent in 3) |
+| `8` shells | every command the agents run and every server they leave up, with its ports; `o` opens the port, `d d` stops it and its children | the live output, command, cwd and ports |
 
 | Key | Does |
 |---|---|
-| `1`–`7`, `tab` | focus a panel |
+| `1`–`8`, `tab` | focus a panel |
 | `+` / `_` | grow / shrink it: normal → half → full |
 | `j` `k` `g` `G` `ctrl+d` `ctrl+u` | move, scroll |
 | `enter` / `esc` | open / back |

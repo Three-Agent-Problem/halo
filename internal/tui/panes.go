@@ -35,6 +35,9 @@ func (s *State) pane(id, w, h int, size Size, focused bool, sc Screen) (string, 
 	cur := u.Cur[id]
 	if cur.detail {
 		title, lines := s.detail(id, w, sc)
+		if cur.tail {
+			cur.dOff = 1 << 20
+		}
 		if lines != nil {
 			return title, c("dim", "j/k scroll · esc back"), scrollLines(lines, cur, h)
 		}
@@ -64,6 +67,8 @@ func (s *State) pane(id, w, h int, size Size, focused bool, sc Screen) (string, 
 		return c("hi!", "EVENTS") + c("dim", " · GET /api/events"), live(sc.Connected), listLines(items, cur, h, focused, true)
 	case pRoster:
 		return s.rosterPane(w, h, size, focused, sc)
+	case pShells:
+		return s.shellsPane(w, h, size, focused, sc)
 	}
 	return "", "", nil
 }
@@ -279,8 +284,19 @@ func (s *State) agentPane(w, h int, size Size, focused bool, sc Screen) (string,
 		}
 	}
 	right := ""
+	if s.live(a, sc.UI) {
+		title += c("reply!", " · live")
+		if focused {
+			right = c("dim", "h/l agent · v calls · enter open")
+		}
+		// listLines puts a 2-cell selection mark before every line.
+		return title, right, s.agentLines(a, s.transcript(a, w-2, size, sc), w, h, focused, sc)
+	}
 	if focused {
 		right = c("dim", "h/l agent")
+		if len(a.Feed) > 0 {
+			right += c("dim", " · v live")
+		}
 	}
 	var items [][]string
 	for _, l := range a.Log {
@@ -307,6 +323,11 @@ func (s *State) agentPane(w, h int, size Size, focused bool, sc Screen) (string,
 			items = append(items, item)
 		}
 	}
+	return title, right, s.agentLines(a, items, w, h, focused, sc)
+}
+
+// agentLines is the agent pane's list with what the agent is doing under it.
+func (s *State) agentLines(a *Agent, items [][]string, w, h int, focused bool, sc Screen) []string {
 	var status []string
 	switch a.State {
 	case "working", "asking", "waiting":
@@ -320,10 +341,10 @@ func (s *State) agentPane(w, h int, size Size, focused bool, sc Screen) (string,
 		status = []string{c(modelKey(a.Model)+"!", string(spin[sc.Frame%len(spin)])) + " " + c("dim", what) + " " + cursor(sc.Frame)}
 	}
 	if len(items) == 0 && len(status) == 0 {
-		return title, right, []string{c("dim", "nothing yet")}
+		return []string{c("dim", "nothing yet")}
 	}
 	list := listLines(items, sc.UI.Cur[pAgent], h-len(status), focused, false)
-	return title, right, append(list, status...)
+	return append(list, status...)
 }
 
 // lastTask is the newest task an agent worked on.
@@ -603,10 +624,22 @@ func (s *State) detail(id, w int, sc Screen) (string, []string) {
 			out = append(out, wrapLines(l, w, 0)...)
 		}
 		return c("hi!", "EVENTS") + c("dim", fmt.Sprintf(" › #%d", s.Raw[sel].Seq)), out
+	case pShells:
+		if sel >= len(s.Shells) {
+			return "", nil
+		}
+		sh := s.Shells[sel]
+		return c("hi!", "SHELLS") + c("dim", fmt.Sprintf(" › pid %d · %d of %d · o open · d d stop", sh.PID, sel+1, len(s.Shells))), s.shellDetail(sh, w, 0, u)
 	case pAgent:
 		a := s.Agents[s.Focus]
 		if a == nil {
 			return "", nil
+		}
+		if s.live(a, u) {
+			if sel >= len(a.Feed) {
+				return "", nil
+			}
+			return c("hi!", "AGENT") + c("dim", fmt.Sprintf(" › %s · %d of %d", s.Short(a.Handle), sel+1, len(a.Feed))), s.blockDetail(a, a.Feed[sel], w)
 		}
 		t := s.lastTask(a.Handle)
 		if t == nil {
@@ -637,9 +670,13 @@ func (s *State) Count(id int, u *UI) int {
 			return len(s.Plan.Subtasks)
 		}
 	case pAgent:
-		if a := s.Agents[s.Focus]; a != nil {
+		if a := s.Agents[s.Focus]; s.live(a, u) {
+			return len(a.Feed)
+		} else if a != nil {
 			return len(a.Log)
 		}
+	case pShells:
+		return len(s.Shells)
 	case pComms:
 		return len(s.comms(u.Filter))
 	case pCommits:

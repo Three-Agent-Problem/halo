@@ -15,6 +15,7 @@ import (
 
 	"github.com/three-agent-problem/halo/internal/config"
 	"github.com/three-agent-problem/halo/internal/host"
+	"github.com/three-agent-problem/halo/internal/shells"
 	"github.com/three-agent-problem/halo/internal/tui"
 )
 
@@ -25,6 +26,7 @@ type team struct {
 	st     *config.State
 	path   string // where the roster is saved
 	notes  chan string
+	feed   chan tui.Update // the agents' raw output
 
 	mu     sync.Mutex
 	cfg    *config.Config
@@ -33,7 +35,7 @@ type team struct {
 }
 
 func newTeam(ctx context.Context, cfg *config.Config, st *config.State, path string) *team {
-	return &team{parent: ctx, cfg: cfg, st: st, path: path, notes: make(chan string, 16)}
+	return &team{parent: ctx, cfg: cfg, st: st, path: path, notes: make(chan string, 16), feed: make(chan tui.Update, 8192)}
 }
 
 func (t *team) note(s string) {
@@ -52,8 +54,14 @@ func (t *team) start() {
 	go func() {
 		defer close(done)
 		err := host.Run(ctx, cfg, t.st, func(e host.Event) {
-			if e.Kind == "error" {
+			switch e.Kind {
+			case "error":
 				t.note(e.Text)
+			case "acp":
+				select {
+				case t.feed <- tui.Update{Agent: e.Agent, Task: e.Task, Type: e.Text, Raw: e.Data, At: time.Now()}:
+				default: // the TUI is behind; drop rather than stall the agent
+				}
 			}
 		})
 		if err != nil && ctx.Err() == nil {
@@ -181,3 +189,14 @@ func (t *team) Land(ctx context.Context, short string) (string, error) {
 	}
 	return summary, nil
 }
+
+// Shells implements tui.Procs: the shells of the agents this process hosts.
+func (t *team) Shells(ctx context.Context) ([]tui.Shell, error) { return shells.Scan(ctx, os.Getpid()) }
+
+// Output implements tui.Procs.
+func (t *team) Output(_ context.Context, path string) (string, error) {
+	return shells.Tail(path, 256<<10)
+}
+
+// Stop implements tui.Procs.
+func (t *team) Stop(ctx context.Context, pid int) error { return shells.Stop(ctx, pid) }

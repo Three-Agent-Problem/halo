@@ -10,7 +10,7 @@ type binding struct{ scope, keys, desc string }
 
 // bindings is every key, for the ? overlay and the footer.
 var bindings = []binding{
-	{"panels", "1 … 7", "focus a panel: 1 plan · 2 orbit · 3 agent · 4 comms · 5 commits · 6 events · 7 roster"},
+	{"panels", "1 … 8", "focus a panel: 1 plan · 2 orbit · 3 agent · 4 comms · 5 commits · 6 events · 7 roster · 8 shells"},
 	{"panels", "tab / shift+tab", "next / previous panel"},
 	{"panels", "+ / _", "grow / shrink the focused panel: normal → half → full"},
 	{"panels", "j k  ↓ ↑", "move the selection; scroll an open item"},
@@ -26,7 +26,8 @@ var bindings = []binding{
 	{"run", "?", "this help; type to search, esc to close"},
 	{"1 plan", "enter", "subtask detail: status, worker, commits, every message about it"},
 	{"3 agent", "h / l", "previous / next agent"},
-	{"3 agent", "enter", "the agent's latest task and its whole answer"},
+	{"3 agent", "v", "live output (thinking, messages, every tool call with its output) ⇄ the tool calls Lagrange saw"},
+	{"3 agent", "enter", "live: the whole entry, a tool call's input and full output · calls: the latest task and its answer"},
 	{"4 comms", "f", "only messages from or to one agent (press again for the next one)"},
 	{"4 comms", "F", "clear the filter"},
 	{"4 comms", "enter", "read the whole message"},
@@ -38,6 +39,10 @@ var bindings = []binding{
 	{"7 roster", "m", "change the selected agent's model: haiku → sonnet → opus"},
 	{"7 roster", "d d", "remove the selected worker"},
 	{"7 roster", "R", "restart the team"},
+	{"8 shells", "enter", "the shell's live output, command, cwd and ports"},
+	{"8 shells", "o", "open its port in the browser"},
+	{"8 shells", "d d", "stop the shell and everything it started"},
+	{"8 shells", "+", "grown: the command, pid, cwd and last output line of each shell"},
 	{"colors", "■ task", "work sent to an agent"},
 	{"colors", "■ ask", "a question: agent → lead, or lead → you"},
 	{"colors", "■ reply", "an answer, a finished subtask"},

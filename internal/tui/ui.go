@@ -11,10 +11,11 @@ const (
 	pCommits = 5
 	pEvents  = 6
 	pRoster  = 7
-	nPanes   = 7
+	pShells  = 8
+	nPanes   = 8
 )
 
-var paneName = [nPanes + 1]string{"", "plan", "orbit", "agent", "comms", "commits", "events", "roster"}
+var paneName = [nPanes + 1]string{"", "plan", "orbit", "agent", "comms", "commits", "events", "roster", "shells"}
 
 // Size is how much of the screen the focused panel takes, like lazygit's screen
 // modes.
@@ -35,6 +36,7 @@ type pcursor struct {
 	off    int  // the first visible item
 	detail bool // the selected item is open
 	dOff   int  // the open item's scroll offset
+	tail   bool // keep the open item scrolled to its end (live output)
 }
 
 // UI is the view state that isn't part of the run: focus, sizes, selections and
@@ -47,14 +49,16 @@ type UI struct {
 	Query  string
 	Filter string            // comms: only messages from or to this handle
 	Diffs  map[string]string // commit SHA → git show output
+	Calls  bool              // agent: the tool calls Lagrange saw, not the live transcript
+	Out    map[int]string    // shell pid → the end of its output
 }
 
 // NewUI focuses the comms panel; the events panel opens at half size since the
 // default layout has no room for it.
 func NewUI() *UI {
-	u := &UI{Focus: pComms, Diffs: map[string]string{}}
+	u := &UI{Focus: pComms, Diffs: map[string]string{}, Out: map[int]string{}}
 	for i := range u.Cur {
-		u.Cur[i] = &pcursor{follow: i != pPlan && i != pRoster}
+		u.Cur[i] = &pcursor{follow: i != pPlan && i != pRoster && i != pShells}
 	}
 	u.Size[pEvents] = sizeHalf
 	return u
@@ -86,6 +90,7 @@ func (u *UI) Move(d, n int) {
 	c := u.cur()
 	if c.detail {
 		c.dOff = max(0, c.dOff+d)
+		c.tail = false
 		return
 	}
 	if n == 0 {
@@ -95,7 +100,7 @@ func (u *UI) Move(d, n int) {
 		c.sel = n - 1
 	}
 	c.sel = max(0, min(n-1, c.sel+d))
-	c.follow = c.sel == n-1 && d > 0 && u.Focus != pPlan && u.Focus != pRoster
+	c.follow = c.sel == n-1 && d > 0 && u.Focus != pPlan && u.Focus != pRoster && u.Focus != pShells
 }
 
 // Top and Bottom jump to the first item, or to the newest and follow it.
@@ -111,7 +116,7 @@ func (u *UI) Top() {
 func (u *UI) Bottom(n int) {
 	c := u.cur()
 	if c.detail {
-		c.dOff = 1 << 20
+		c.dOff, c.tail = 1<<20, true
 		return
 	}
 	c.sel, c.follow = max(0, n-1), true

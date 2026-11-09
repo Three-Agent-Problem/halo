@@ -7,7 +7,6 @@ import (
 	"iter"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
@@ -45,8 +44,8 @@ func (h *Host) newWorker(ctx context.Context, a config.Agent, logw io.Writer) (*
 	if a.Role == config.RoleReviewer {
 		rules = a2aacp.ToolRules{Allow: []string{"*"}, Deny: []string{"edit", "delete", "move"}}
 	}
-	exec, err := a2aacp.NewExecutor(ctx, a2aacp.Process{Argv: strings.Fields(h.cfg.ACP), Dir: h.cfg.Repo, Stderr: logw,
-		Env: append(os.Environ(), "MCP_TOOL_TIMEOUT=1800000")}, &a2aacp.Config{
+	exec, err := a2aacp.NewExecutor(ctx, h.agent(w.handle, logw), &a2aacp.Config{
+		Converter:  h.tap(w.handle),
 		AutoAnswer: rules,
 		Settings: func(context.Context, *a2asrv.ExecutorContext) (map[string]any, error) {
 			return map[string]any{"model": a.Model}, nil

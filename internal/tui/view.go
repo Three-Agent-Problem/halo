@@ -33,6 +33,7 @@ type Screen struct {
 	Flash     string
 	UI        *UI
 	Team      string   // "team here" or "watch-only"
+	Procs     bool     // this Halo can see the agents' shells
 	Overlay   []string // a box drawn in the middle (the /resume list)
 }
 
@@ -95,8 +96,9 @@ func (s *State) normal(w, h int, sc Screen) []string {
 			lower = pEvents
 		}
 		left := s.paneBox(pPlan, leftW, planH, sc) + "\n" + s.paneBox(lower, leftW, midH-planH, sc)
-		rosterH := min(len(s.Order)+2, midH/2)
-		right := s.paneBox(pAgent, rightW, midH-rosterH, sc) + "\n" + s.paneBox(pRoster, rightW, rosterH, sc)
+		rosterH := min(len(s.Order)+2, midH/3)
+		shellsH := min(max(len(s.Shells)+2, 3), 8, midH/4)
+		right := s.paneBox(pAgent, rightW, midH-rosterH-shellsH, sc) + "\n" + s.paneBox(pShells, rightW, shellsH, sc) + "\n" + s.paneBox(pRoster, rightW, rosterH, sc)
 		mid = lipgloss.JoinHorizontal(lipgloss.Top, left, s.paneBox(pOrbit, w-leftW-rightW, midH, sc), right)
 	} else {
 		// Narrow: the focused panel (or the orbit) above the comms.

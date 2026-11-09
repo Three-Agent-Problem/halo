@@ -24,6 +24,10 @@ type Options struct {
 	Watching string
 	// Notes are messages from the agents' host (errors, restarts) for the header.
 	Notes <-chan string
+	// Feed is the raw output of the hosted agents; Procs their shells. Both are
+	// nil when this Halo only watches.
+	Feed  <-chan Update
+	Procs Procs
 }
 
 type mode int
@@ -97,6 +101,13 @@ func Run(ctx context.Context, o Options) error {
 			}
 		}()
 	}
+	if o.Feed != nil {
+		go func() {
+			for u := range o.Feed {
+				p.Send(u)
+			}
+		}()
+	}
 	_, err := p.Run()
 	if err == tea.ErrProgramKilled && ctx.Err() != nil {
 		return nil
@@ -146,7 +157,9 @@ func (m *model) fetch() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func (m *model) Init() tea.Cmd { return tea.Batch(tick(), m.fetch(), m.poll(), m.fetchRuns(true)) }
+func (m *model) Init() tea.Cmd {
+	return tea.Batch(tick(), m.fetch(), m.poll(), m.fetchRuns(true), m.fetchShells())
+}
 
 func (m *model) say(s string) { m.flash, m.flashAt = s, time.Now() }
 
@@ -161,9 +174,32 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.flash != "" && time.Since(m.flashAt) > 5*time.Second {
 			m.flash = ""
 		}
+		if m.frame%12 == 0 {
+			return m, tea.Batch(tick(), m.wantOutput())
+		}
 		return m, tick()
 	case pollMsg:
-		return m, tea.Batch(m.fetch(), m.poll())
+		return m, tea.Batch(m.fetch(), m.poll(), m.fetchShells())
+	case Update:
+		m.st.Feed(msg)
+	case shellsMsg:
+		c := m.ui.Cur[pShells]
+		pid := 0
+		if c.sel < len(m.st.Shells) {
+			pid = m.st.Shells[c.sel].PID
+		}
+		m.st.Shells = msg
+		for i, sh := range msg {
+			if sh.PID == pid {
+				c.sel = i
+			}
+		}
+		if c.detail && pid != 0 && (c.sel >= len(msg) || msg[c.sel].PID != pid) {
+			c.detail = false
+			m.say(fmt.Sprintf("pid %d exited", pid))
+		}
+	case outMsg:
+		m.ui.Out[msg.pid] = msg.text
 	case entryMsg:
 		root := m.st.Root
 		m.st.Apply(lg.Entry(msg), time.Now())
@@ -386,6 +422,11 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	}
+	if u.Focus == pShells && m.o.Procs != nil {
+		if cmd, ok := m.shellKey(key); ok {
+			return m, cmd
+		}
+	}
 	switch key {
 	case "q":
 		return m.quit()
@@ -444,6 +485,12 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 			}
 			m.st.CycleFocus(time.Now(), d)
 			u.Cur[pAgent] = &pcursor{follow: true}
+		}
+	case "v":
+		if u.Focus == pAgent {
+			u.Calls = !u.Calls
+			u.Cur[pAgent] = &pcursor{follow: true}
+			m.say(pick(u.Calls, "agent: the tool calls Lagrange saw", "agent: live output"))
 		}
 	case "f":
 		if u.Focus == pComms {
@@ -532,6 +579,10 @@ func (m *model) open(n int) (tea.Model, tea.Cmd) {
 		c.sel = n - 1
 	}
 	c.follow, c.detail, c.dOff = false, true, 0
+	if u.Focus == pShells {
+		c.tail = true
+		return m, m.wantOutput()
+	}
 	return m, m.wantDiff()
 }
 
@@ -549,7 +600,7 @@ func (m *model) View() tea.View {
 
 func (m *model) render(now time.Time) string {
 	sc := Screen{W: m.w, H: m.h, Frame: m.frame, Now: now, Server: m.o.Server, Connected: m.connected,
-		Online: m.online, Waiting: len(m.waits), Flash: m.flash, UI: m.ui, Team: "team here"}
+		Online: m.online, Waiting: len(m.waits), Flash: m.flash, UI: m.ui, Team: "team here", Procs: m.o.Procs != nil}
 	if m.o.Team == nil {
 		sc.Team = "watch-only"
 	}
@@ -565,8 +616,9 @@ func (m *model) render(now time.Time) string {
 
 // paneKeys are the footer hints of the focused panel.
 var paneKeys = map[int][][2]string{
-	pPlan: {{"enter", "subtask"}}, pOrbit: {{"enter", "bigger"}}, pAgent: {{"h/l", "agent"}, {"enter", "answer"}},
+	pPlan: {{"enter", "subtask"}}, pOrbit: {{"enter", "bigger"}}, pAgent: {{"h/l", "agent"}, {"v", "live/calls"}, {"enter", "open"}},
 	pComms: {{"enter", "read"}, {"f", "filter"}}, pCommits: {{"enter", "diff"}}, pEvents: {{"enter", "json"}}, pRoster: {{"enter", "watch"}, {"n", "add"}, {"m", "model"}, {"d", "remove"}},
+	pShells: {{"enter", "output"}, {"o", "open port"}, {"d d", "stop"}},
 }
 
 func (m *model) footer() string {
@@ -599,7 +651,7 @@ func (m *model) footer() string {
 				keys += k("[ ]", "prev/next")
 			}
 		} else {
-			keys = k("1-7", "panel") + k("+/_", "size")
+			keys = k("1-8", "panel") + k("+/_", "size")
 			for _, h := range paneKeys[m.ui.Focus] {
 				keys += k(h[0], h[1])
 			}

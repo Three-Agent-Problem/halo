@@ -100,10 +100,11 @@ func tuiCmd(ctx context.Context, args []string) error {
 		for _, a := range cfg.Agents {
 			handles = append(handles, cfg.Handle(a.Name))
 		}
+		d := &tui.Demo{Human: "kaan", Prefix: cfg.Prefix}
 		return tui.Run(ctx, tui.Options{
-			Backend: &tui.Demo{Human: "kaan", Prefix: cfg.Prefix},
-			State:   tui.NewState(cfg.Prefix, members(cfg, "kaan")),
-			Server:  "demo (no server)", Handles: handles, Watching: "the demo has no agents",
+			Backend: d, Feed: d.Updates(), Procs: d,
+			State:  tui.NewState(cfg.Prefix, members(cfg, "kaan")),
+			Server: "demo (no server)", Handles: handles, Watching: "the demo has no agents",
 		})
 	}
 	cfg, st, rosterPath, err := load(*cfgPath)
@@ -150,7 +151,7 @@ func tuiCmd(ctx context.Context, args []string) error {
 			t.stop()
 			t.mu.Unlock()
 		}()
-		o.Team, o.Notes = t, t.notes
+		o.Team, o.Notes, o.Feed, o.Procs = t, t.notes, t.feed, t
 	}
 	return tui.Run(ctx, o)
 }
