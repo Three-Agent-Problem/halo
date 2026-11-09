@@ -32,12 +32,13 @@ type lead struct {
 	exec   *a2aacp.Executor
 
 	mu    sync.Mutex
-	runs  map[string]*run // by root platform task
-	byCtx map[string]*run // by the lead's A2A context
+	runs  map[string]*run   // by root platform task
+	byCtx map[string]*run   // the newest run of each of the lead's A2A contexts
+	ctxOf map[string]string // the context of each run
 }
 
 func (h *Host) newLead(ctx context.Context, a config.Agent, logw io.Writer) (*lead, error) {
-	l := &lead{h: h, agent: a, handle: h.handle(a), runs: map[string]*run{}, byCtx: map[string]*run{}}
+	l := &lead{h: h, agent: a, handle: h.handle(a), runs: map[string]*run{}, byCtx: map[string]*run{}, ctxOf: map[string]string{}}
 	workers := map[string][]string{}
 	for _, w := range h.cfg.ByRole(config.RoleWorker) {
 		workers[w.Model] = append(workers[w.Model], "@"+h.handle(w))
@@ -55,6 +56,7 @@ func (h *Host) newLead(ctx context.Context, a config.Agent, logw io.Writer) (*le
 				"headers": []map[string]string{{"name": "Halo-Run", "value": delegate.Task(ctx)}}})
 			return a2aacp.SessionParams{Cwd: h.cfg.Repo, MCPServers: []json.RawMessage{srv}}, nil
 		},
+		SessionStore: h.sessions.scope("lead"),
 		Prompt: func(_ context.Context, ec *a2asrv.ExecutorContext) ([]*a2a.Part, error) {
 			if ec.StoredTask != nil {
 				return ec.Message.Parts, nil
@@ -137,22 +139,34 @@ func final(ev a2a.Event) bool {
 func (l *lead) runFor(ctx context.Context, ec *a2asrv.ExecutorContext) *run {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if r, ok := l.byCtx[ec.ContextID]; ok {
-		return r
-	}
 	id := delegate.Task(ctx)
 	if id == "" {
 		id = string(ec.TaskID)
 	}
+	if r, ok := l.runs[id]; ok {
+		return r
+	}
+	// A new prompt in a context the lead knows (a resumed conversation) is a new
+	// run: its own plan and branch, but the same Claude session, which remembers.
 	r := &run{l: l, id: id, short: shortID(id), events: make(chan event, 256), questions: map[string]*question{}}
-	l.runs[id], l.byCtx[ec.ContextID] = r, r
+	l.runs[id], l.byCtx[ec.ContextID], l.ctxOf[id] = r, r, ec.ContextID
 	return r
 }
 
+// run returns the run the lead's MCP session id belongs to. A session keeps the
+// run it was created for in its headers, so this follows its context to the
+// newest run.
 func (l *lead) run(id string) *run {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.runs[id]
+	r := l.runs[id]
+	if r == nil {
+		return nil
+	}
+	if n := l.byCtx[l.ctxOf[id]]; n != nil {
+		return n
+	}
+	return r
 }
 
 func shortID(id string) string {

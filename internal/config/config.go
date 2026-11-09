@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -72,7 +73,7 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	c.fill(filepath.Dir(path))
-	return c, c.validate()
+	return c, c.Validate()
 }
 
 func (c *Config) fill(dir string) {
@@ -249,4 +250,93 @@ func (s *State) SetToken(handle, token string) {
 		s.Tokens = map[string]string{}
 	}
 	s.Tokens[s.Server+" "+handle] = token
+}
+
+// RosterPath is the global roster, next to the state: one team for every repo.
+// HALO_ROSTER overrides it.
+func RosterPath() (string, error) {
+	if p := os.Getenv("HALO_ROSTER"); p != "" {
+		return p, nil
+	}
+	p, err := StatePath()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(p), "roster.yaml"), nil
+}
+
+// LoadRoster returns the roster: local if that file exists (a repo that wants its
+// own team), else the global one, which it creates from Default on first use.
+// The second result says where it came from.
+func LoadRoster(local string) (*Config, string, error) {
+	if local != "" {
+		if _, err := os.Stat(local); err == nil {
+			c, err := Load(local)
+			return c, local, err
+		}
+	}
+	p, err := RosterPath()
+	if err != nil {
+		return nil, "", err
+	}
+	if _, err := os.Stat(p); errors.Is(err, fs.ErrNotExist) {
+		c := Default()
+		return c, p, c.SaveRoster(p)
+	}
+	c, err := Load(p)
+	return c, p, err
+}
+
+var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,30}$`)
+
+// Validate checks the roster: one lead, one reviewer, at least one worker, and
+// unique names that work as handles.
+func (c *Config) Validate() error {
+	seen := map[string]bool{}
+	for _, a := range c.Agents {
+		if !nameRe.MatchString(a.Name) {
+			return fmt.Errorf("agent name %q: use lowercase letters, digits and dashes", a.Name)
+		}
+		if seen[a.Name] {
+			return fmt.Errorf("two agents are named %s", a.Name)
+		}
+		seen[a.Name] = true
+	}
+	return c.validate()
+}
+
+// SaveRoster writes the roster (prefix, coding agent and agents) to path.
+func (c *Config) SaveRoster(path string) error {
+	if err := c.Validate(); err != nil {
+		return err
+	}
+	out := struct {
+		Server string  `yaml:"server,omitempty"`
+		Prefix string  `yaml:"prefix"`
+		ACP    string  `yaml:"acp,omitempty"`
+		Agents []Agent `yaml:"agents"`
+	}{c.Server, c.Prefix, c.ACP, c.Agents}
+	if out.ACP == "claude-agent-acp" {
+		out.ACP = ""
+	}
+	raw, err := yaml.Marshal(out)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	head := "# Halo's team, shared by every repo. Edit it in Halo: panel 7 (roster).\n"
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, append([]byte(head), raw...), 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+// Clone returns a deep copy.
+func (c *Config) Clone() *Config {
+	n := *c
+	n.Agents = append([]Agent(nil), c.Agents...)
+	return &n
 }

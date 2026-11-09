@@ -86,16 +86,18 @@ func GitCommits(ctx context.Context, repo, short string, since time.Time) ([]Com
 	// character goes in brackets to name exactly that branch.
 	run := "--glob=refs/heads/halo/" + short[:len(short)-1] + "[" + short[len(short)-1:] + "]"
 	subs := "--glob=refs/heads/halo/" + short + "-*"
-	var all []Commit
-	for _, args := range [][]string{
-		{"log", logFormat, "--shortstat", "--diff-merges=first-parent", after, run, subs},
-		{"log", logFormat, "--shortstat", "--diff-merges=first-parent", after, "--author=^halo$", "HEAD"},
-	} {
-		out, err := gitOut(ctx, repo, args...)
-		if err != nil {
-			return nil, err
+	out, err := gitOut(ctx, repo, "log", logFormat, "--shortstat", "--diff-merges=first-parent", after, run, subs)
+	if err != nil {
+		return nil, err
+	}
+	all := parseLog(out)
+	// After the run lands, its branches are gone: find the merge that landed it on
+	// the checked-out branch and list what that merge brought in.
+	land, err := gitOut(ctx, repo, "log", "-1", "--format=%H", "-i", "--fixed-strings", "--grep=merge halo/"+short, after, "HEAD")
+	if land = strings.TrimSpace(land); err == nil && land != "" {
+		if out, err := gitOut(ctx, repo, "log", logFormat, "--shortstat", "--diff-merges=first-parent", land+"^1.."+land); err == nil {
+			all = append(all, parseLog(out)...)
 		}
-		all = append(all, parseLog(out)...)
 	}
 	return all, nil
 }

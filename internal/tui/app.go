@@ -18,6 +18,12 @@ type Options struct {
 	State   *State
 	Server  string
 	Handles []string // the roster's agent handles, for the online count
+	// Team is the roster this Halo hosts; nil when it only watches, for the reason
+	// in Watching.
+	Team     Team
+	Watching string
+	// Notes are messages from the agents' host (errors, restarts) for the header.
+	Notes <-chan string
 }
 
 type mode int
@@ -27,6 +33,7 @@ const (
 	modePrompt
 	modeAnswer
 	modeNote
+	modeName // naming a new agent
 )
 
 const promptHint = "describe what to build, then enter"
@@ -36,7 +43,7 @@ type (
 	tickMsg    time.Time
 	connMsg    struct{ ok bool }
 	waitsMsg   []Wait
-	onlineMsg  int
+	onlineMsg  []string
 	commitsMsg []Commit
 	diffMsg    struct{ sha, text string }
 	doneMsg    struct {
@@ -61,6 +68,10 @@ type model struct {
 	flash     string
 	flashAt   time.Time
 	cancelArm time.Time
+	quitArm   time.Time
+	deleteArm string
+	deleteAt  time.Time
+	picker    *picker
 	ctx       context.Context
 }
 
@@ -79,6 +90,13 @@ func Run(ctx context.Context, o Options) error {
 	go func() {
 		_ = o.Backend.Stream(ctx, func(e lg.Entry) { p.Send(entryMsg(e)) }, func(ok bool, _ error) { p.Send(connMsg{ok}) })
 	}()
+	if o.Notes != nil {
+		go func() {
+			for n := range o.Notes {
+				p.Send(noteMsg(n))
+			}
+		}()
+	}
 	_, err := p.Run()
 	if err == tea.ErrProgramKilled && ctx.Err() != nil {
 		return nil
@@ -108,11 +126,11 @@ func (m *model) fetch() tea.Cmd {
 		func() tea.Msg {
 			ctx, cancel := context.WithTimeout(m.ctx, 5*time.Second)
 			defer cancel()
-			n, err := m.o.Backend.Online(ctx, m.o.Handles)
+			on, err := m.o.Backend.Online(ctx, m.o.Handles)
 			if err != nil {
 				return nil
 			}
-			return onlineMsg(n)
+			return onlineMsg(on)
 		},
 	}
 	if m.st.Root != "" {
@@ -128,7 +146,7 @@ func (m *model) fetch() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-func (m *model) Init() tea.Cmd { return tea.Batch(tick(), m.fetch(), m.poll()) }
+func (m *model) Init() tea.Cmd { return tea.Batch(tick(), m.fetch(), m.poll(), m.fetchRuns(true)) }
 
 func (m *model) say(s string) { m.flash, m.flashAt = s, time.Now() }
 
@@ -164,12 +182,28 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mode = modeNormal
 		}
 	case onlineMsg:
-		m.online = int(msg)
+		m.online = len(msg)
+		m.st.SetOnline(msg)
 	case commitsMsg:
 		m.st.SetCommits(msg)
 		return m, m.wantDiff()
 	case diffMsg:
 		m.ui.Diffs[msg.sha] = msg.text
+	case noteMsg:
+		m.say(string(msg))
+	case runsMsg:
+		switch {
+		case msg.startup:
+			m.startupHint(msg.runs)
+		case m.picker != nil && msg.err != nil:
+			m.picker = nil
+			m.say("can't list runs: " + msg.err.Error())
+		case m.picker != nil:
+			m.picker.runs, m.picker.loading = msg.runs, false
+		}
+	case historyMsg:
+		m.replay(msg)
+		return m, m.fetch()
 	case doneMsg:
 		if msg.err != nil {
 			m.say(msg.what + " failed: " + msg.err.Error())
@@ -205,7 +239,10 @@ func (m *model) wantDiff() tea.Cmd {
 func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := k.String()
 	if key == "ctrl+c" {
-		return m, tea.Quit
+		return m.quit()
+	}
+	if m.picker != nil {
+		return m.pickerKey(k)
 	}
 	if m.ui.Help {
 		switch key {
@@ -227,11 +264,38 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch m.mode {
+	case modeName:
+		switch key {
+		case "esc":
+			m.mode = modeNormal
+			m.input.SetValue("")
+			m.input.Blur()
+			m.input.Placeholder = promptHint
+			return m, nil
+		case "enter":
+			name := m.input.Value()
+			m.input.SetValue("")
+			m.input.Blur()
+			m.input.Placeholder = promptHint
+			m.mode = modeNormal
+			return m, m.addAgent(name)
+		}
+		var cmd tea.Cmd
+		m.input, cmd = m.input.Update(k)
+		return m, cmd
 	case modePrompt:
 		switch key {
 		case "esc":
 			m.mode = modeNormal
 			m.input.Blur()
+			return m, nil
+		case "tab":
+			if v := m.input.Value(); strings.HasPrefix(v, "/") {
+				if cs := matchCommands(v); len(cs) > 0 {
+					m.input.SetValue(cs[0][0])
+					m.input.CursorEnd()
+				}
+			}
 			return m, nil
 		case "enter":
 			text := strings.TrimSpace(m.input.Value())
@@ -241,7 +305,10 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.input.SetValue("")
 			m.input.Blur()
 			m.mode = modeNormal
-			m.st.Follow = true
+			if strings.HasPrefix(text, "/") {
+				return m, m.command(text)
+			}
+			m.st.Follow, m.st.Hint = true, ""
 			return m, func() tea.Msg {
 				_, err := m.o.Backend.Send(m.ctx, text)
 				return doneMsg{"prompt sent to " + m.st.Short(m.st.Lead), err}
@@ -314,13 +381,23 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 		u.Focus = int(key[0] - '0')
 		return m, nil
 	}
+	if u.Focus == pRoster && !u.cur().detail {
+		if cmd, ok := m.rosterKey(key); ok {
+			return m, cmd
+		}
+	}
 	switch key {
 	case "q":
-		return m, tea.Quit
+		return m.quit()
 	case "?":
 		u.Help, u.Query = true, ""
 	case "i", "p":
 		m.mode = modePrompt
+		return m, m.input.Focus()
+	case "/":
+		m.mode = modePrompt
+		m.input.SetValue("/")
+		m.input.CursorEnd()
 		return m, m.input.Focus()
 	case "a":
 		if len(m.waits) > 0 {
@@ -418,6 +495,16 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// quit quits, after a second press when this Halo's agents are working on a run.
+func (m *model) quit() (tea.Model, tea.Cmd) {
+	if m.o.Team != nil && m.running() && time.Since(m.quitArm) > 3*time.Second {
+		m.quitArm = time.Now()
+		m.say("a run is in flight: press q again to stop the agents and quit")
+		return m, nil
+	}
+	return m, tea.Quit
+}
+
 // open opens the selected item of the focused panel.
 func (m *model) open(n int) (tea.Model, tea.Cmd) {
 	u := m.ui
@@ -462,10 +549,16 @@ func (m *model) View() tea.View {
 
 func (m *model) render(now time.Time) string {
 	sc := Screen{W: m.w, H: m.h, Frame: m.frame, Now: now, Server: m.o.Server, Connected: m.connected,
-		Online: m.online, Waiting: len(m.waits), Flash: m.flash, UI: m.ui}
+		Online: m.online, Waiting: len(m.waits), Flash: m.flash, UI: m.ui, Team: "team here"}
+	if m.o.Team == nil {
+		sc.Team = "watch-only"
+	}
 	sc.Footer = m.footer()
 	if (m.mode == modeAnswer || m.mode == modeNote) && len(m.waits) > 0 {
 		sc.Bottom, sc.BottomTag = m.answerPane(), fmt.Sprintf("%s asks you", m.st.Short(m.waits[0].Asker))
+	}
+	if m.picker != nil && m.w >= 80 && m.h >= 24 {
+		sc.Overlay = m.pickerBox(min(m.w-4, 110), min(m.h-4, max(9, len(m.picker.shown())+6)))
 	}
 	return m.st.Render(sc)
 }
@@ -473,7 +566,7 @@ func (m *model) render(now time.Time) string {
 // paneKeys are the footer hints of the focused panel.
 var paneKeys = map[int][][2]string{
 	pPlan: {{"enter", "subtask"}}, pOrbit: {{"enter", "bigger"}}, pAgent: {{"h/l", "agent"}, {"enter", "answer"}},
-	pComms: {{"enter", "read"}, {"f", "filter"}}, pCommits: {{"enter", "diff"}}, pEvents: {{"enter", "json"}}, pRoster: {{"enter", "watch"}},
+	pComms: {{"enter", "read"}, {"f", "filter"}}, pCommits: {{"enter", "diff"}}, pEvents: {{"enter", "json"}}, pRoster: {{"enter", "watch"}, {"n", "add"}, {"m", "model"}, {"d", "remove"}},
 }
 
 func (m *model) footer() string {
@@ -486,9 +579,16 @@ func (m *model) footer() string {
 	k := func(key, what string) string { return c("mute!", key) + c("dim", " "+what+"  ") }
 	var keys string
 	switch {
+	case m.picker != nil:
+		keys = k("↑↓", "choose") + k("enter", "resume") + k("type", "filter") + k("esc", "close")
 	case m.ui.Help:
 		keys = k("type", "search") + k("esc", "close")
-	case m.mode == modePrompt || m.mode == modeNote:
+	case m.mode == modePrompt && strings.HasPrefix(m.input.Value(), "/"):
+		for _, cm := range matchCommands(m.input.Value()) {
+			keys += c("hub!", cm[0]) + c("dim", " "+cm[1]+"  ")
+		}
+		keys += k("tab", "complete")
+	case m.mode == modePrompt || m.mode == modeNote || m.mode == modeName:
 		keys = k("⏎", "send") + k("esc", "back")
 	case m.mode == modeAnswer:
 		keys = k("y", "approve") + k("n", "reject") + k("r", "reply") + k("esc", "later")
@@ -508,7 +608,7 @@ func (m *model) footer() string {
 	}
 	var prompt string
 	switch m.mode {
-	case modePrompt, modeNote:
+	case modePrompt, modeNote, modeName:
 		prompt = c("hub!", "› ") + m.input.View()
 	default:
 		text := m.st.Prompt

@@ -32,6 +32,8 @@ type Screen struct {
 	BottomTag string
 	Flash     string
 	UI        *UI
+	Team      string   // "team here" or "watch-only"
+	Overlay   []string // a box drawn in the middle (the /resume list)
 }
 
 // Render draws the whole screen.
@@ -68,6 +70,10 @@ func (s *State) Render(sc Screen) string {
 	if sc.Bottom != "" {
 		ab := strings.Split(box(sc.W, commsH, c("ask!", "ANSWER")+c("dim", " · "+sc.BottomTag), "", strings.Split(sc.Bottom, "\n"), true), "\n")
 		body = append(body[:len(body)-commsH], ab...)
+	}
+	if len(sc.Overlay) > 0 {
+		w := ansi.StringWidth(sc.Overlay[0])
+		body = overlay(body, sc.Overlay, (sc.W-w)/2, max(0, (bodyH-len(sc.Overlay))/2), sc.W)
 	}
 	if u.Help {
 		w, h := min(sc.W-4, 96), min(bodyH-2, 40)
@@ -106,6 +112,9 @@ func (s *State) normal(w, h int, sc Screen) []string {
 // planHeight is what the plan panel needs at normal size.
 func (s *State) planHeight() int {
 	if s.Plan == nil {
+		if s.Hint != "" {
+			return 4 + 1 + min(3, len(wrapLines(s.Hint, leftW-4, 0)))
+		}
 		return 6
 	}
 	n := len(s.Plan.Subtasks) + 2 + min(2, len(wrapLines(s.Plan.Goal, leftW-6, 0))) + 1
@@ -176,7 +185,15 @@ func (s *State) header(sc Screen) string {
 		}
 		el = c("hi!", mmss(end.Sub(s.RootAt))) + sep
 	}
-	right := c("sonnet", sparkline(buckets)) + sep + c("mute", fmt.Sprintf("%d online", sc.Online)) + sep +
+	team := ""
+	if sc.Team != "" {
+		key := "mute"
+		if sc.Team == "watch-only" {
+			key = "ask"
+		}
+		team = c(key, sc.Team) + sep
+	}
+	right := c("sonnet", sparkline(buckets)) + sep + team + c("mute", fmt.Sprintf("%d online", sc.Online)) + sep +
 		c("mute", strings.TrimPrefix(strings.TrimPrefix(sc.Server, "https://"), "http://")) + " " + conn + sep + el + c("dim", sc.Now.Format("15:04"))
 	gap := sc.W - ansi.StringWidth(left) - ansi.StringWidth(right)
 	if gap < 1 {

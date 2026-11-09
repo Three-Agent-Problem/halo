@@ -2,8 +2,10 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/three-agent-problem/lagrange/client"
@@ -31,20 +33,36 @@ type Backend interface {
 	Answer(ctx context.Context, taskID, text, decision string) error
 	// Cancel cancels a task.
 	Cancel(ctx context.Context, taskID string) error
-	// Online counts the roster's agents with a tunnel up.
-	Online(ctx context.Context, handles []string) (int, error)
+	// Online lists the roster's agents with a tunnel up.
+	Online(ctx context.Context, handles []string) ([]string, error)
 	// Commits lists the commits of run short since it started.
 	Commits(ctx context.Context, short string, since time.Time) ([]Commit, error)
 	// Diff returns a commit's git show output.
 	Diff(ctx context.Context, sha string) (string, error)
+	// Runs lists your runs with the lead, newest first.
+	Runs(ctx context.Context) ([]RunInfo, error)
+	// History returns the activity log so far, oldest first.
+	History(ctx context.Context) ([]lg.Entry, error)
+	// Continue makes later prompts continue run root's conversation, so the lead
+	// remembers it; "" starts a fresh one.
+	Continue(root string)
+}
+
+// RunInfo is a past run, for /resume.
+type RunInfo struct {
+	ID, Title, State string
+	Tasks            int
+	Started, Updated time.Time
 }
 
 // Live is the Backend of a Lagrange server.
 type Live struct {
 	Server, Key, Human, Lead string
 	Repo                     string // the git repository the team works on
-	Since                    int64  // where the stream starts: 0 replays everything
+	Since                    int64  // where the stream starts: 0 replays everything, -1 starts now
 	c                        *client.Client
+	mu                       sync.Mutex
+	root                     string // the run whose conversation prompts continue
 }
 
 func (l *Live) client() *client.Client {
@@ -61,7 +79,16 @@ func (l *Live) Stream(ctx context.Context, fn func(lg.Entry), connected func(boo
 
 // Send implements Backend.
 func (l *Live) Send(ctx context.Context, text string) (string, error) {
-	res, err := l.client().Send(ctx, &client.Send{To: l.Lead, Text: text})
+	send := &client.Send{To: l.Lead, Text: text}
+	l.mu.Lock()
+	root := l.root
+	l.mu.Unlock()
+	if root != "" {
+		if t, err := l.client().Task(ctx, root); err == nil {
+			send.ContextID = t.ContextID
+		}
+	}
+	res, err := l.client().Send(ctx, send)
 	if err != nil {
 		return "", err
 	}
@@ -103,22 +130,22 @@ func (l *Live) Cancel(ctx context.Context, taskID string) error {
 }
 
 // Online implements Backend.
-func (l *Live) Online(ctx context.Context, handles []string) (int, error) {
+func (l *Live) Online(ctx context.Context, handles []string) ([]string, error) {
 	addrs, err := l.client().Addresses(ctx)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	want := map[string]bool{}
 	for _, h := range handles {
 		want[h] = true
 	}
-	n := 0
+	var on []string
 	for _, a := range addrs {
 		if want[a.Handle] && a.Online {
-			n++
+			on = append(on, a.Handle)
 		}
 	}
-	return n, nil
+	return on, nil
 }
 
 // Commits implements Backend from the local git repository.
@@ -129,4 +156,44 @@ func (l *Live) Commits(ctx context.Context, short string, since time.Time) ([]Co
 // Diff implements Backend.
 func (l *Live) Diff(ctx context.Context, sha string) (string, error) {
 	return GitShow(ctx, l.Repo, sha)
+}
+
+// Runs implements Backend.
+func (l *Live) Runs(ctx context.Context) ([]RunInfo, error) {
+	rs, err := l.client().Runs(ctx, client.RunFilter{Participant: l.Lead, Limit: 50})
+	if err != nil {
+		return nil, err
+	}
+	var out []RunInfo
+	for _, r := range rs {
+		if r.Starter != l.Human {
+			continue
+		}
+		out = append(out, RunInfo{ID: r.ID, Title: r.Title, State: r.State, Tasks: r.Tasks, Started: r.StartedAt, Updated: r.UpdatedAt})
+	}
+	return out, nil
+}
+
+// History implements Backend: it pages through GET /api/activity.
+func (l *Live) History(ctx context.Context) ([]lg.Entry, error) {
+	var all []lg.Entry
+	var since int64
+	for {
+		var page struct{ Entries []lg.Entry }
+		if err := l.client().Do(ctx, http.MethodGet, fmt.Sprintf("/api/activity?since=%d&limit=5000", since), nil, &page); err != nil {
+			return nil, err
+		}
+		all = append(all, page.Entries...)
+		if len(page.Entries) < 5000 {
+			return all, nil
+		}
+		since = page.Entries[len(page.Entries)-1].Seq
+	}
+}
+
+// Continue implements Backend.
+func (l *Live) Continue(root string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.root = root
 }

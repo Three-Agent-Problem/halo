@@ -20,41 +20,51 @@ go build -o halo ./cmd/halo && ./halo --demo
 
 ## Run it for real
 
-You need a Lagrange server and an API key (Settings → API keys), plus Claude Code and its ACP adapter on the machine that runs the agents: `npm i -g @agentclientprotocol/claude-agent-acp`.
+You need a Lagrange server and an API key (Settings → API keys), plus Claude Code and its ACP adapter: `npm i -g @agentclientprotocol/claude-agent-acp`.
 
 ```sh
-cd your-repo                                  # a git repo with at least one commit
-halo init --server https://lagrange.example.com --key lgk_...
-halo agents                                   # terminal 1: the roster, keep it running
-halo                                          # terminal 2: the TUI; enter, type a prompt, enter
+cd your-repo      # a git repo with at least one commit
+halo              # first run asks for the server and the key
 ```
+
+- **Halo hosts the team itself.** It starts the lead, the workers and the reviewer, and they work on the repository you started it in.
+  - Quitting while a run is in flight asks first, because the agents stop with Halo.
+  - **One team, one host.** If the team is already online in another Halo, this one opens watch-only. Use `halo -watch` to watch on purpose.
+  - `halo agents` still runs the team headless, for hosting it on another machine.
+- **The team is global.** It lives in `~/Library/Application Support/halo/roster.yaml` and you edit it in panel 7. A `halo.yaml` in a repository overrides it for that repository only.
+- **Halo opens with an empty screen.** The plan panel offers your last run, and `/resume` reopens any past run: its whole history loads at once, and your next prompt continues that conversation, so the lead remembers it. Claude sessions are saved to disk, so this works across restarts too.
 
 **The agents run Claude Code without asking per tool call.**
-- Workers may do anything inside their worktree, and the reviewer and lead may not edit files.
-- The worktrees live outside your repo, in `~/Library/Caches/halo/<repo>-<hash>/`, so your checkout never changes.
-- When every subtask is merged into `halo/<run>`, halo merges that branch into the branch you started from (needs no uncommitted changes to tracked files; untracked files are fine) and removes the run's worktrees and branches. If that fails (conflict, dirty checkout), the branch is kept and `halo merge <run>` merges it later; `halo merge` lists runs.
+- Workers may do anything inside their own worktree; the reviewer and the lead may not edit files.
+- The worktrees live outside your repo, in `~/Library/Caches/halo/<repo>-<hash>/`.
+- When every subtask is merged, Halo merges the run into the branch you have checked out, then deletes its worktrees and branches.
 
-A `halo.yaml` next to the repo sets the roster; without one you get one lead, four workers (haiku, two sonnets, opus) and a reviewer:
+## Panels and keys
 
-```yaml
-server: https://lagrange.example.com
-prefix: halo            # handles become @halo-lead, @halo-sonnet-1, ...
-agents:
-  - {name: lead, model: opus, role: lead}
-  - {name: haiku-1, model: haiku}
-  - {name: sonnet-1, model: sonnet}
-  - {name: reviewer, model: sonnet, role: reviewer}
-```
+Like lazygit: every panel has a number. `+` grows the focused panel to half the screen, then to all of it, and `enter` opens the selected item.
 
-## Keys
+| Panel | Shows | `enter` opens |
+|---|---|---|
+| `1` plan | subtasks, models, progress; grown: deps, worker, notes | the subtask: status, attempts, its commits and every message about it |
+| `2` orbit | every message travelling through Lagrange | (grows it) |
+| `3` agent | the focused agent's tool calls (`h`/`l` switch agents) | its latest task and whole answer |
+| `4` comms | agent ⇄ agent messages, wrapped (`f` filters by agent) | the whole message |
+| `5` commits | the run's commits, live | the diff (`[` `]` previous/next) |
+| `6` events | the raw Lagrange activity feed | the entry as JSON |
+| `7` roster | the team; `n` add · `m` model · `d d` remove · `R` restart | (watch that agent in 3) |
 
 | Key | Does |
 |---|---|
-| `enter` | Type a prompt; `enter` sends it to the lead. |
-| `a` | Answer what waits on you (plan approval): `y` approve, `n` reject, `r` reply with text. |
-| `tab` | Move the focus pane to the next agent. |
-| `x x` | Cancel the run. |
-| `q` | Quit. |
+| `1`–`7`, `tab` | focus a panel |
+| `+` / `_` | grow / shrink it: normal → half → full |
+| `j` `k` `g` `G` `ctrl+d` `ctrl+u` | move, scroll |
+| `enter` / `esc` | open / back |
+| `i` | prompt the lead |
+| `/` | commands: `/clear` (start fresh), `/resume` (reopen a past run), `/merge` (land the run now), `/agents`, `/help` |
+| `a` | answer what waits on you: `y` approve, `n` reject, `r` reply |
+| `x x` | cancel the run |
+| `?` | every key; type to search |
+| `q` | quit |
 
 ## How a run goes
 

@@ -44,7 +44,9 @@ func TestGitCommits(t *testing.T) {
 	git("checkout", "-q", "halo/abc123")
 	git("merge", "-q", "--no-ff", "-m", "halo: merge S1 add b", "halo/abc123-S1")
 	git("checkout", "-q", "main")
-	git("checkout", "-qb", "halo/other-S1") // another run: not listed
+	git("merge", "-q", "--no-ff", "-m", "halo: merge halo/abc123", "halo/abc123")
+	git("branch", "-q", "-D", "halo/abc123", "halo/abc123-S1") // cleaned up after landing
+	git("checkout", "-qb", "halo/other-S1")                    // another run: not listed
 	write("c.txt", "c\n")
 	git("add", "-A")
 	git("commit", "-qm", "halo: S1 other run")
@@ -60,10 +62,13 @@ func TestGitCommits(t *testing.T) {
 	for _, c := range st.Commits {
 		subjects = append(subjects, c.Subject)
 	}
-	if got := strings.Join(subjects, " | "); got != "halo: S1 add b | halo: merge S1 add b" && got != "halo: merge S1 add b | halo: S1 add b" {
-		t.Fatalf("commits: %s", got)
+	if len(subjects) != 3 || !strings.Contains(strings.Join(subjects, " | "), "halo: merge halo/abc123") {
+		t.Fatalf("commits: %s", strings.Join(subjects, " | "))
 	}
 	for _, c := range st.Commits {
+		if c.Subject == "halo: merge halo/abc123" {
+			continue
+		}
 		if c.Sub != "S1" || c.Files != 1 || c.Add != 2 {
 			t.Errorf("%s: sub %q files %d +%d", c.Subject, c.Sub, c.Files, c.Add)
 		}

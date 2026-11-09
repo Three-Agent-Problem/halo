@@ -75,7 +75,16 @@ func (d *Demo) Answer(_ context.Context, _ string, text, decision string) error 
 func (d *Demo) Cancel(context.Context, string) error { return nil }
 
 // Online implements Backend.
-func (d *Demo) Online(context.Context, []string) (int, error) { return 6, nil }
+func (d *Demo) Online(_ context.Context, handles []string) ([]string, error) { return handles, nil }
+
+// Runs implements Backend: the demo keeps no history.
+func (d *Demo) Runs(context.Context) ([]RunInfo, error) { return nil, nil }
+
+// History implements Backend.
+func (d *Demo) History(context.Context) ([]lg.Entry, error) { return nil, nil }
+
+// Continue implements Backend.
+func (d *Demo) Continue(string) {}
 
 // Commits implements Backend: the commits the scripted run made.
 func (d *Demo) Commits(context.Context, string, time.Time) ([]Commit, error) {

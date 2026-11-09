@@ -150,6 +150,11 @@ type State struct {
 	Reviews   int
 	Seq       int64
 
+	// Pin, when set, is the only root task that starts a run (a resumed run).
+	Pin string
+	// Hint is shown while there is no run, e.g. how to resume the last one.
+	Hint string
+
 	Focus       string
 	focusAt     time.Time
 	manualFocus time.Time
@@ -209,10 +214,17 @@ func (s *State) model(handle string) string {
 
 // Apply folds one activity entry in.
 func (s *State) Apply(e lg.Entry, now time.Time) {
+	if e.Seq > 0 && e.Seq <= s.Seq {
+		return // seen already: a replay overlapping the live stream
+	}
 	if e.Seq > s.Seq {
 		s.Seq = e.Seq
 	}
 	live := now.Sub(e.At) < 15*time.Second || e.At.IsZero()
+	if !live {
+		// History (a resume, a replay): keep the times it happened at.
+		now = e.At
+	}
 	if e.Kind == "presence" {
 		if a, ok := s.Agents[e.Recipient]; ok {
 			a.Online = e.Num("sessions") > 0
@@ -220,7 +232,7 @@ func (s *State) Apply(e lg.Entry, now time.Time) {
 		return
 	}
 	if e.Kind == "task" && e.TaskID != "" && e.ParentTaskID == "" && e.Sender == s.Human && e.Recipient == s.Lead &&
-		s.Tasks[e.TaskID] == nil && (s.Root == "" || s.Follow) {
+		s.Tasks[e.TaskID] == nil && (s.Root == "" || s.Follow) && (s.Pin == "" || s.Pin == e.TaskID) {
 		s.startRun(e, now)
 	}
 	if !s.inRun(e) {

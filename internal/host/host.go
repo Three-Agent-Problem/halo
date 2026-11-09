@@ -66,14 +66,39 @@ type Host struct {
 	mcpURL string
 	lead   *lead
 	ctx    context.Context
+	// sessions remembers Claude sessions on disk, so a restarted Halo continues
+	// them (when the agent supports session/load).
+	sessions *sessionFile
 
 	mu      sync.Mutex
 	workers map[string]*worker // by handle, the reviewer included
 	busy    map[string]int     // tasks the lead has in flight per worker
 }
 
-// Run runs the roster until ctx ends.
-func Run(ctx context.Context, cfg *config.Config, st *config.State) error {
+// Event is something the running roster reports: an agent connected, where the
+// logs are, an error.
+type Event struct {
+	Kind  string // "start", "online", "error"
+	Agent string // the handle, for "online"
+	Text  string
+}
+
+// Print is a notify func for a terminal: one line per event.
+func Print(e Event) {
+	switch e.Kind {
+	case "online":
+		fmt.Printf("  ●  @%-16s %s\n", e.Agent, e.Text)
+	default:
+		fmt.Println(e.Text)
+	}
+}
+
+// Run runs the roster until ctx ends, reporting what happens to notify (nil
+// prints).
+func Run(ctx context.Context, cfg *config.Config, st *config.State, notify func(Event)) error {
+	if notify == nil {
+		notify = Print
+	}
 	wt, err := newWorktrees(cfg.Repo)
 	if err != nil {
 		return err
@@ -102,7 +127,8 @@ func Run(ctx context.Context, cfg *config.Config, st *config.State) error {
 	}
 	defer logFile.Close()
 	h := &Host{cfg: cfg, st: st, api: api, wt: wt, workers: map[string]*worker{}, busy: map[string]int{},
-		log: slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{Level: slog.LevelInfo}))}
+		sessions: openSessions(filepath.Join(wt.root, "sessions.json")),
+		log:      slog.New(slog.NewTextHandler(logFile, &slog.HandlerOptions{Level: slog.LevelInfo}))}
 
 	// The MCP server the agents' Claude sessions call.
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -129,14 +155,14 @@ func Run(ctx context.Context, cfg *config.Config, st *config.State) error {
 			defer wg.Done()
 			err := tunnel.Run(ctx, tunnel.ClientConfig{Server: st.Server, Token: st.Token(handle), Capacity: a.Capacity,
 				Handler: handler, UserAgent: "halo", Logger: h.log,
-				OnConnect: func() { fmt.Printf("  ●  @%-16s %-7s %s\n", handle, a.Model, a.Role) }})
+				OnConnect: func() { notify(Event{Kind: "online", Agent: handle, Text: a.Model + " " + a.Role}) }})
 			if err != nil && !errors.Is(err, context.Canceled) {
 				errs <- fmt.Errorf("@%s: %w", handle, err)
 				cancel()
 			}
 		}()
 	}
-	fmt.Printf("halo agents · %s · repo %s\n  worktrees and logs: %s\n", st.Server, cfg.Repo, wt.root)
+	notify(Event{Kind: "start", Text: fmt.Sprintf("halo agents · %s · repo %s\n  worktrees and logs: %s", st.Server, cfg.Repo, wt.root)})
 	for _, a := range cfg.Agents {
 		if a.Role == config.RoleLead {
 			continue

@@ -45,10 +45,10 @@ func run(ctx context.Context, args []string) error {
 		case "help", "-h", "--help":
 			fmt.Println(`usage:
   halo init --server URL --key lgk_...   save the Lagrange server and an API key, create the addresses
-  halo agents [-config halo.yaml]         run the roster on this machine (keep it running)
+  halo agents [-config halo.yaml]         run the team headless (halo hosts it itself; this is for another machine)
   halo merge                              list finished runs (halo/<run> branches)
   halo merge <run> [--keep]               merge a run into the checked-out branch, then clean it up
-  halo [-config halo.yaml] [-since N]     the TUI
+  halo [-watch] [-since N]                the TUI; it hosts the team on this repository unless another halo does
   halo --demo                             the TUI playing a scripted run, no server needed`)
 			return nil
 		}
@@ -56,19 +56,25 @@ func run(ctx context.Context, args []string) error {
 	return tuiCmd(ctx, args)
 }
 
-func load(path string) (*config.Config, *config.State, error) {
-	cfg, err := config.Load(path)
+// load reads the roster (a local halo.yaml if there is one, else the global
+// roster) and the saved state. It returns where the roster lives.
+func load(path string) (*config.Config, *config.State, string, error) {
+	cfg, from, err := config.LoadRoster(path)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
+	}
+	if from != path {
+		// The global roster works on the repository Halo runs in.
+		cfg.Repo = gitTop()
 	}
 	st, err := config.LoadState()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, "", err
 	}
 	if cfg.Server != "" && os.Getenv("LAGRANGE_SERVER") == "" {
 		st.Server = cfg.Server
 	}
-	return cfg, st, nil
+	return cfg, st, from, nil
 }
 
 func members(cfg *config.Config, human string) []tui.Member {
@@ -81,45 +87,72 @@ func members(cfg *config.Config, human string) []tui.Member {
 
 func tuiCmd(ctx context.Context, args []string) error {
 	fs := flag.NewFlagSet("halo", flag.ContinueOnError)
-	cfgPath := fs.String("config", "halo.yaml", "Roster file.")
+	cfgPath := fs.String("config", "halo.yaml", "A roster for this repository only (default: the global roster).")
 	demo := fs.Bool("demo", false, "Play a scripted run without a server.")
-	since := fs.Int64("since", 0, "Activity sequence to start from (0 replays everything, -1 starts now).")
+	since := fs.Int64("since", -1, "Activity sequence to start from: -1 starts now (/resume reopens a past run), 0 replays everything.")
+	watch := fs.Bool("watch", false, "Only watch: don't host the agents here.")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	cfg, st, err := load(*cfgPath)
+	if *demo {
+		cfg := config.Default()
+		var handles []string
+		for _, a := range cfg.Agents {
+			handles = append(handles, cfg.Handle(a.Name))
+		}
+		return tui.Run(ctx, tui.Options{
+			Backend: &tui.Demo{Human: "kaan", Prefix: cfg.Prefix},
+			State:   tui.NewState(cfg.Prefix, members(cfg, "kaan")),
+			Server:  "demo (no server)", Handles: handles, Watching: "the demo has no agents",
+		})
+	}
+	cfg, st, rosterPath, err := load(*cfgPath)
 	if err != nil {
 		return err
+	}
+	if st.Server == "" || st.Key == "" {
+		if err := setup(ctx, st); err != nil {
+			return err
+		}
+	}
+	if st.Human == "" {
+		me, err := client.New(st.Server, st.Key).Me(ctx)
+		if err != nil {
+			return fmt.Errorf("who am I on %s: %w", st.Server, err)
+		}
+		st.Human = me.User.Handle
 	}
 	var handles []string
 	for _, a := range cfg.Agents {
 		handles = append(handles, cfg.Handle(a.Name))
 	}
-	if *demo {
-		cfg = config.Default()
-		human := "kaan"
-		return tui.Run(ctx, tui.Options{
-			Backend: &tui.Demo{Human: human, Prefix: cfg.Prefix},
-			State:   tui.NewState(cfg.Prefix, members(cfg, human)),
-			Server:  "demo (no server)", Handles: handles,
-		})
+	live := &tui.Live{Server: st.Server, Key: st.Key, Human: st.Human, Lead: cfg.Handle(cfg.Lead().Name), Since: *since, Repo: cfg.Repo}
+	o := tui.Options{Backend: live, State: tui.NewState(cfg.Prefix, members(cfg, st.Human)), Server: st.Server, Handles: handles}
+
+	// Host the team here unless another Halo already does (one team, one host).
+	on, err := live.Online(ctx, handles)
+	switch online := len(on); {
+	case *watch:
+		o.Watching = "started with -watch"
+	case cfg.Repo == "":
+		o.Watching = "not in a git repository, so the agents have nowhere to work"
+	case err != nil:
+		o.Watching = "couldn't check the team: " + err.Error()
+	case online > 0:
+		o.Watching = fmt.Sprintf("%d of the team's agents are online in another Halo", online)
+	default:
+		t := newTeam(ctx, cfg, st, rosterPath)
+		t.mu.Lock()
+		t.start()
+		t.mu.Unlock()
+		defer func() {
+			t.mu.Lock()
+			t.stop()
+			t.mu.Unlock()
+		}()
+		o.Team, o.Notes = t, t.notes
 	}
-	if st.Server == "" || st.Key == "" {
-		return errors.New("no server or API key: run halo init --server URL --key KEY (or set LAGRANGE_SERVER and LAGRANGE_KEY), or try halo --demo")
-	}
-	human := st.Human
-	if human == "" {
-		me, err := client.New(st.Server, st.Key).Me(ctx)
-		if err != nil {
-			return fmt.Errorf("who am I on %s: %w", st.Server, err)
-		}
-		human = me.User.Handle
-	}
-	return tui.Run(ctx, tui.Options{
-		Backend: &tui.Live{Server: st.Server, Key: st.Key, Human: human, Lead: cfg.Handle(cfg.Lead().Name), Since: *since, Repo: cfg.Repo},
-		State:   tui.NewState(cfg.Prefix, members(cfg, human)),
-		Server:  st.Server, Handles: handles,
-	})
+	return tui.Run(ctx, o)
 }
 
 func initCmd(ctx context.Context, args []string) error {
@@ -130,7 +163,7 @@ func initCmd(ctx context.Context, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	cfg, st, err := load(*cfgPath)
+	cfg, st, _, err := load(*cfgPath)
 	if err != nil {
 		return err
 	}
@@ -165,12 +198,15 @@ func agentsCmd(ctx context.Context, args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	cfg, st, err := load(*cfgPath)
+	cfg, st, _, err := load(*cfgPath)
 	if err != nil {
 		return err
 	}
 	if st.Server == "" || st.Key == "" {
 		return errors.New("run halo init first")
 	}
-	return host.Run(ctx, cfg, st)
+	if cfg.Repo == "" {
+		return errors.New("run halo agents inside a git repository: the agents work on it")
+	}
+	return host.Run(ctx, cfg, st, nil)
 }

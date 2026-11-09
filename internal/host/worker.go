@@ -161,8 +161,10 @@ func (s *workerSessions) Get(_ context.Context, contextID string) (a2aacp.Sessio
 	key := w.keyOf(contextID)
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	sess, ok := w.sessions[key]
-	return sess, ok, nil
+	if sess, ok := w.sessions[key]; ok {
+		return sess, true, nil
+	}
+	return w.h.sessions.get(w.handle + " " + key)
 }
 
 func (s *workerSessions) Put(_ context.Context, contextID string, sess a2aacp.Session) error {
@@ -171,7 +173,7 @@ func (s *workerSessions) Put(_ context.Context, contextID string, sess a2aacp.Se
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.sessions[key] = sess
-	return nil
+	return w.h.sessions.put(w.handle+" "+key, sess)
 }
 
 func nonEmpty(v ...string) string {
