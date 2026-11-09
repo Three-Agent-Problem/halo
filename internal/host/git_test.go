@@ -166,7 +166,7 @@ func TestCommitAll(t *testing.T) {
 func TestDiff(t *testing.T) {
 	w := newTestWorktrees(t)
 	ctx := context.Background()
-	runBranch, runDir, err := w.runBranch(ctx, "abc123")
+	runBranch, _, err := w.runBranch(ctx, "abc123")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,7 +192,6 @@ func TestDiff(t *testing.T) {
 	if !strings.Contains(cut, "diff cut at 20") {
 		t.Errorf("cut = %q", cut)
 	}
-	_ = runDir
 }
 
 func TestMerge(t *testing.T) {
