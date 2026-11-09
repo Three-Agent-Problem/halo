@@ -83,7 +83,7 @@ func (m *model) command(text string) tea.Cmd {
 	case "/help":
 		m.ui.Help, m.ui.Query = true, ""
 	case "/agents":
-		m.ui.Focus = pRoster
+		m.ui.SetFocus(pRoster)
 	case "/merge":
 		switch {
 		case m.o.Team == nil:

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -50,25 +51,10 @@ func (s *State) Render(sc Screen) string {
 	foot := strings.Split(sc.Footer, "\n")
 	bodyH := sc.H - 1 - len(foot)
 	var body []string
-	switch size := u.Size[u.Focus]; {
-	case size == sizeNormal:
+	if u.grown() == sizeFull {
+		body = append([]string{s.tabs(sc.W, sc)}, strings.Split(s.paneBox(u.Focus, sc.W, bodyH-1, sc), "\n")...)
+	} else {
 		body = s.normal(sc.W, bodyH, sc)
-	default:
-		body = []string{s.tabs(sc.W, sc)}
-		h := bodyH - 1
-		if size == sizeFull {
-			body = append(body, strings.Split(s.paneBox(u.Focus, sc.W, h, sc), "\n")...)
-			break
-		}
-		// The companion is a panel that reads well narrow: the live agent, or the
-		// comms when the agent is the one grown.
-		mainW := sc.W * 64 / 100
-		other := pAgent
-		if u.Focus == pAgent {
-			other = pComms
-		}
-		body = append(body, strings.Split(lipgloss.JoinHorizontal(lipgloss.Top,
-			s.paneBox(u.Focus, mainW, h, sc), s.paneBox(other, sc.W-mainW, h, sc)), "\n")...)
 	}
 	if sc.Bottom != "" {
 		ab := strings.Split(box(sc.W, commsH, c("ask!", "ANSWER")+c("dim", " · "+sc.BottomTag), "", strings.Split(sc.Bottom, "\n"), true), "\n")
@@ -91,32 +77,211 @@ func (s *State) Render(sc Screen) string {
 	return strings.Join(append(append([]string{s.header(sc)}, body...), foot...), "\n")
 }
 
-// normal is the default layout: plan and commits on the left, the orbit in the
-// middle, the focused agent and the roster on the right, comms at the bottom.
+// normal is the layout below full size: plan and commits on the left, the orbit
+// in the middle, the focused agent, shells and roster on the right, comms at the
+// bottom. A grown panel takes its column (its mates collapse to bars), then the
+// orbit's width; a minimized panel is a one-line bar and its column mates share
+// the room it leaves.
 func (s *State) normal(w, h int, sc Screen) []string {
 	u := sc.UI
-	midH := h - commsH
-	var mid string
-	if w >= minWide {
-		planH := min(max(s.planHeight(), 6), midH-6)
-		lower := pCommits
-		if u.Focus == pEvents {
-			lower = pEvents
-		}
-		left := s.paneBox(pPlan, leftW, planH, sc) + "\n" + s.paneBox(lower, leftW, midH-planH, sc)
-		rosterH := min(len(s.Order)+2, midH/3)
-		shellsH := min(max(len(s.Shells)+2, 3), 8, midH/4)
-		right := s.paneBox(pAgent, rightW, midH-rosterH-shellsH, sc) + "\n" + s.paneBox(pShells, rightW, shellsH, sc) + "\n" + s.paneBox(pRoster, rightW, rosterH, sc)
-		mid = lipgloss.JoinHorizontal(lipgloss.Top, left, s.paneBox(pOrbit, w-leftW-rightW, midH, sc), right)
-	} else {
-		// Narrow: the focused panel (or the orbit) above the comms.
+	g := u.grown()
+	ch := commsH
+	if u.Focus == pComms && g == sizeColumn {
+		ch = max(commsH, h/2)
+	}
+	midH := h - ch
+	var mid []string
+	switch {
+	case w < minWide:
+		// Narrow: the focused panel (or the orbit) above the comms; there is no
+		// column to take, so column and wide look like normal.
 		id := u.Focus
 		if id == pComms {
 			id = pOrbit
 		}
-		mid = s.paneBox(id, w, midH, sc)
+		if u.Size[id] == sizeMin {
+			mid = append([]string{s.miniBar(id, w, sc)}, strings.Split(s.paneBox(pOrbit, w, midH-1, sc), "\n")...)
+		} else {
+			mid = strings.Split(s.paneBox(id, w, midH, sc), "\n")
+		}
+	case u.Focus == pOrbit && g == sizeWide:
+		mid = strings.Split(s.paneBox(pOrbit, w, midH, sc), "\n")
+	default:
+		lower := pCommits
+		if u.Focus == pEvents {
+			lower = pEvents
+		}
+		leftIDs, rightIDs := []int{pPlan, lower}, []int{pAgent, pShells, pRoster}
+		lw, rw, orbit := leftW, rightW, true
+		if g == sizeWide && u.Focus != pOrbit && u.Focus != pComms {
+			orbit = false
+			if slices.Contains(leftIDs, u.Focus) {
+				lw = w - rightW
+			} else {
+				rw = w - leftW
+			}
+		}
+		parts := []string{s.column(leftIDs, lower, lw, midH, sc)}
+		if orbit {
+			parts = append(parts, s.paneBox(pOrbit, w-lw-rw, midH, sc))
+		}
+		parts = append(parts, s.column(rightIDs, pAgent, rw, midH, sc))
+		mid = strings.Split(lipgloss.JoinHorizontal(lipgloss.Top, parts...), "\n")
 	}
-	return append(strings.Split(mid, "\n"), strings.Split(s.paneBox(pComms, w, commsH, sc), "\n")...)
+	return append(mid, strings.Split(s.paneBox(pComms, w, ch, sc), "\n")...)
+}
+
+// column stacks panels ids in a w×h column. Minimized panels, and the mates of a
+// grown one, are one-line bars; flex takes the height the others leave (the last
+// open panel does when flex is closed).
+func (s *State) column(ids []int, flex, w, h int, sc Screen) string {
+	u := sc.UI
+	grown := 0
+	if u.grown() >= sizeColumn && slices.Contains(ids, u.Focus) {
+		grown = u.Focus
+	}
+	var open []int
+	for _, id := range ids {
+		if u.Size[id] != sizeMin && (grown == 0 || id == grown) {
+			open = append(open, id)
+		}
+	}
+	avail := h - (len(ids) - len(open))
+	heights := map[int]int{}
+	if len(open) > 0 {
+		if !slices.Contains(open, flex) {
+			flex = open[len(open)-1]
+		}
+		rest := avail
+		for _, id := range open {
+			if id != flex {
+				heights[id] = s.natural(id, avail)
+				rest -= heights[id]
+			}
+		}
+		heights[flex] = rest
+	}
+	var out []string
+	for _, id := range ids {
+		if hh, ok := heights[id]; ok {
+			out = append(out, strings.Split(s.paneBox(id, w, hh, sc), "\n")...)
+		} else {
+			out = append(out, s.miniBar(id, w, sc))
+		}
+	}
+	if len(open) == 0 {
+		out = append(out, c("dim", fit("  every panel here is minimized · focus one and press + to open it", w)))
+		for len(out) < h {
+			out = append(out, strings.Repeat(" ", w))
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
+// natural is the height panel id wants next to a flexible mate, with avail
+// rows in the column.
+func (s *State) natural(id, avail int) int {
+	switch id {
+	case pPlan:
+		return max(3, min(max(s.planHeight(), 6), avail-6))
+	case pShells:
+		return max(3, min(max(len(s.Shells)+2, 3), 8, avail/4))
+	case pRoster:
+		return max(3, min(len(s.Order)+2, avail/3))
+	}
+	return max(3, avail/3)
+}
+
+// miniBar is a minimized panel: its number, name and a one-line summary in a
+// border-colored rule.
+func (s *State) miniBar(id, w int, sc Screen) string {
+	bc, num := "line2", c("dim", fmt.Sprintf("%d ", id))
+	if sc.UI.Focus == id {
+		bc, num = "haiku", c("haiku!", fmt.Sprintf("%d ", id))
+	}
+	left := c(bc, "╶─ ") + c(bc+"!", "▸ ") + num + c("hi!", strings.ToUpper(paneName[id]))
+	if sum := s.summary(id, sc); sum != "" {
+		left += c("dim", " · ") + c("mute", sum)
+	}
+	left += " "
+	right := c("dim", " + ") + c(bc, "─╴")
+	if ansi.StringWidth(left)+ansi.StringWidth(right)+1 > w {
+		left = ansi.Truncate(left, max(0, w-ansi.StringWidth(right)-2), "…") + " "
+	}
+	fill := w - ansi.StringWidth(left) - ansi.StringWidth(right)
+	if fill < 1 {
+		return fit(left, w)
+	}
+	return left + c(bc, strings.Repeat("─", fill)) + right
+}
+
+// summary is the one line a minimized panel shows.
+func (s *State) summary(id int, sc Screen) string {
+	switch id {
+	case pPlan:
+		if s.Plan == nil {
+			return pick(s.Root == "", "no run", "planning")
+		}
+		n := map[string]int{}
+		for _, st := range s.Plan.Subtasks {
+			n[st.Status]++
+		}
+		out := fmt.Sprintf("%d/%d done", n[plan.Done], len(s.Plan.Subtasks))
+		if r := n[plan.Running] + n[plan.Changes]; r > 0 {
+			out += fmt.Sprintf(" · %d running", r)
+		}
+		if a := n[plan.Asking]; a > 0 {
+			out += fmt.Sprintf(" · %d asking", a)
+		}
+		if f := n[plan.Failed] + n[plan.Conflict]; f > 0 {
+			out += fmt.Sprintf(" · %d failed", f)
+		}
+		if !s.Plan.Approved {
+			out += " · awaiting approval"
+		}
+		return out
+	case pCommits:
+		if len(s.Commits) == 0 {
+			return "none yet"
+		}
+		return fmt.Sprintf("%d · last %s", len(s.Commits), ago(sc.Now.Sub(s.Commits[len(s.Commits)-1].At)))
+	case pEvents:
+		return fmt.Sprintf("%d events", len(s.Raw))
+	case pAgent:
+		a := s.Agents[s.Focus]
+		if a == nil {
+			return "nobody yet"
+		}
+		out := s.Short(a.Handle) + " " + a.Model
+		if a.Sub != "" {
+			out += " · " + a.Sub
+		}
+		if a.State != "" {
+			out += " · " + a.State
+		}
+		return out
+	case pShells:
+		ports := []string{}
+		for _, sh := range s.Shells {
+			for _, p := range sh.Ports {
+				ports = append(ports, fmt.Sprintf(":%d", p))
+			}
+		}
+		out := fmt.Sprintf("%d running", len(s.Shells))
+		if len(ports) > 0 {
+			out += " · " + strings.Join(ports, " ")
+		}
+		return out
+	case pRoster:
+		working := 0
+		for _, hd := range s.Order {
+			if a := s.Agents[hd]; a != nil && a.State == "working" {
+				working++
+			}
+		}
+		return fmt.Sprintf("%d agents · %d working", len(s.Order), working)
+	}
+	return ""
 }
 
 // planHeight is what the plan panel needs at normal size.

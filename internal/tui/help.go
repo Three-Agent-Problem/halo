@@ -11,8 +11,9 @@ type binding struct{ scope, keys, desc string }
 // bindings is every key, for the ? overlay and the footer.
 var bindings = []binding{
 	{"panels", "1 … 8", "focus a panel: 1 plan · 2 orbit · 3 agent · 4 comms · 5 commits · 6 events · 7 roster · 8 shells"},
-	{"panels", "tab / shift+tab", "next / previous panel"},
-	{"panels", "+ / _", "grow / shrink the focused panel: normal → half → full"},
+	{"panels", "tab / shift+tab", "next / previous panel; grown panels go back to normal, minimized ones stay minimized"},
+	{"panels", "+ / -", "grow: take the column (its mates collapse to bars) → also the orbit's width → full screen"},
+	{"panels", "- / _", "shrink; below normal a panel collapses to a one-line bar (not the orbit or comms), + reopens it"},
 	{"panels", "j k  ↓ ↑", "move the selection; scroll an open item"},
 	{"panels", "g / G", "first item / newest item (and follow it)"},
 	{"panels", "ctrl+d / ctrl+u", "half a page down / up"},

@@ -90,7 +90,9 @@ func (m *model) inputText() bool {
 
 // completes is true in the modes that type to agents, where @ # and paths
 // complete.
-func (m *model) completes() bool { return m.mode == modePrompt || m.mode == modeNote || m.mode == modeMessage }
+func (m *model) completes() bool {
+	return m.mode == modePrompt || m.mode == modeNote || m.mode == modeMessage
+}
 
 // cursorRune is the cursor's offset in the (single-line) value, in runes.
 func (m *model) cursorRune() int {

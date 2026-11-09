@@ -462,7 +462,7 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 	n := m.st.Count(u.Focus, u)
 	page := max(3, (m.h-4)/2)
 	if len(key) == 1 && key[0] >= '1' && key[0] <= '0'+nPanes {
-		u.Focus = int(key[0] - '0')
+		u.SetFocus(int(key[0] - '0'))
 		return m, nil
 	}
 	if u.Focus == pRoster && !u.cur().detail {
@@ -628,7 +628,8 @@ func (m *model) open(n int) (tea.Model, tea.Cmd) {
 		if c.sel < len(m.st.Order) && m.st.Order[c.sel] != m.st.Human {
 			m.st.Focus = m.st.Order[c.sel]
 			m.st.manualFocus = time.Now().Add(time.Hour)
-			u.Focus, u.Cur[pAgent] = pAgent, &pcursor{follow: true}
+			u.SetFocus(pAgent)
+			u.Cur[pAgent] = &pcursor{follow: true}
 		}
 		return m, nil
 	case pOrbit:
@@ -735,7 +736,7 @@ func (m *model) footer() string {
 				keys += k("[ ]", "prev/next")
 			}
 		} else {
-			keys = k("1-8", "panel") + k("+/_", "size")
+			keys = k("1-8", "panel") + k("+/-", "size")
 			for _, h := range paneKeys[m.ui.Focus] {
 				keys += k(h[0], h[1])
 			}

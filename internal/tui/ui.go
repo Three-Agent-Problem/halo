@@ -17,17 +17,57 @@ const (
 
 var paneName = [nPanes + 1]string{"", "plan", "orbit", "agent", "comms", "commits", "events", "roster", "shells"}
 
-// Size is how much of the screen the focused panel takes, like lazygit's screen
-// modes.
+// Size is how much of the screen a panel takes. Growing takes space from the
+// neighbours step by step: first the panel's column, then the orbit's width, then
+// the whole screen. Shrinking below normal collapses a panel to a one-line bar.
 type Size int
 
 const (
-	sizeNormal Size = iota // the default layout
-	sizeHalf               // the panel takes most of the screen, one companion stays
-	sizeFull               // the panel takes the whole screen
+	sizeMin    Size = iota - 1 // a one-line bar, like a closed accordion
+	sizeNormal                 // the default layout
+	sizeColumn                 // the panel takes its whole column (comms: half the height)
+	sizeWide                   // its column also takes the orbit's width
+	sizeFull                   // the panel takes the whole screen
 )
 
-func (z Size) String() string { return [...]string{"normal", "half", "full"}[z] }
+func (z Size) String() string {
+	switch z {
+	case sizeMin:
+		return "minimized"
+	case sizeColumn:
+		return "column"
+	case sizeWide:
+		return "wide"
+	case sizeFull:
+		return "full"
+	}
+	return "normal"
+}
+
+// ladder is the sizes panel id steps through. The orbit and comms are the
+// frame of the layout, so they never collapse; the orbit has no column, and the
+// comms grow upwards (column means taller) but never wider than the screen.
+func ladder(id int) []Size {
+	switch id {
+	case pOrbit:
+		return []Size{sizeNormal, sizeWide, sizeFull}
+	case pComms:
+		return []Size{sizeNormal, sizeColumn, sizeFull}
+	}
+	return []Size{sizeMin, sizeNormal, sizeColumn, sizeWide, sizeFull}
+}
+
+// columnOf is the panels that share a column with id in the wide layout, top to
+// bottom, or nil for the orbit and comms. Commits and events share a slot.
+func columnOf(id int) []int {
+	switch id {
+	case pPlan, pCommits, pEvents:
+		return []int{pPlan, pCommits, pEvents}
+	case pAgent, pShells, pRoster:
+		return []int{pAgent, pShells, pRoster}
+	}
+	return nil
+}
 
 // cursor is a panel's selection and scroll state.
 type pcursor struct {
@@ -53,35 +93,56 @@ type UI struct {
 	Out    map[int]string    // shell pid → the end of its output
 }
 
-// NewUI focuses the comms panel; the events panel opens at half size since the
-// default layout has no room for it.
+// NewUI focuses the comms panel.
 func NewUI() *UI {
 	u := &UI{Focus: pComms, Diffs: map[string]string{}, Out: map[int]string{}}
 	for i := range u.Cur {
 		u.Cur[i] = &pcursor{follow: i != pPlan && i != pRoster && i != pShells}
 	}
-	u.Size[pEvents] = sizeHalf
 	return u
 }
 
 func (u *UI) cur() *pcursor { return u.Cur[u.Focus] }
 
-// Grow and Shrink step the focused panel's size.
-func (u *UI) Grow() {
-	if u.Size[u.Focus] < sizeFull {
-		u.Size[u.Focus]++
+// Grow and Shrink step the focused panel along its ladder.
+func (u *UI) Grow() { u.step(1) }
+
+func (u *UI) Shrink() { u.step(-1) }
+
+func (u *UI) step(d int) {
+	l := ladder(u.Focus)
+	i := 0
+	for j, z := range l {
+		if z == u.Size[u.Focus] {
+			i = j
+		}
 	}
+	u.Size[u.Focus] = l[max(0, min(len(l)-1, i+d))]
 }
 
-func (u *UI) Shrink() {
-	if u.Size[u.Focus] > sizeNormal {
-		u.Size[u.Focus]--
+// grown is the focused panel's size when it is bigger than normal; only the
+// focused panel can be, since moving the focus resets the others.
+func (u *UI) grown() Size {
+	if z := u.Size[u.Focus]; z > sizeNormal {
+		return z
 	}
+	return sizeNormal
+}
+
+// SetFocus focuses panel id. Grown panels go back to normal so cycling through
+// the panels shows the usual layout; minimized ones stay minimized.
+func (u *UI) SetFocus(id int) {
+	for i := range u.Size {
+		if u.Size[i] > sizeNormal {
+			u.Size[i] = sizeNormal
+		}
+	}
+	u.Focus = id
 }
 
 // FocusNext moves the focus by d panels, wrapping around.
 func (u *UI) FocusNext(d int) {
-	u.Focus = (u.Focus-1+d+nPanes)%nPanes + 1
+	u.SetFocus((u.Focus-1+d+nPanes)%nPanes + 1)
 }
 
 // Move moves the focused panel's selection (or the open item's scroll) by d,

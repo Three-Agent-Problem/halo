@@ -16,10 +16,7 @@ import (
 func (s *State) paneBox(id, w, h int, sc Screen) string {
 	u := sc.UI
 	focused := u.Focus == id
-	size := sizeNormal
-	if focused {
-		size = u.Size[id]
-	}
+	size := max(u.Size[id], sizeNormal)
 	title, right, lines := s.pane(id, w-4, h-2, size, focused, sc)
 	num := c("dim", fmt.Sprintf("%d ", id))
 	if focused {

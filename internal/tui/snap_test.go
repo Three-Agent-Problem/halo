@@ -98,13 +98,29 @@ func TestDemoRenders(t *testing.T) {
 			m.w, m.h = size[0], size[1]
 			for id := 1; id <= nPanes; id++ {
 				m.ui.Focus = id
-				for z := sizeNormal; z <= sizeFull; z++ {
+				for _, z := range ladder(id) {
 					m.ui.Size[id] = z
 					m.ui.Cur[id].detail = frames%2 == 1
-					m.ui.Help = id == pComms && z == sizeHalf
+					m.ui.Help = id == pComms && z == sizeColumn
 					checkFrame(t, m.render(now), size[0], size[1], fmt.Sprintf("panel %d %s detail=%v", id, z, m.ui.Cur[id].detail))
 				}
 				m.ui.Size[id], m.ui.Cur[id].detail, m.ui.Help = sizeNormal, false, false
+			}
+			// Everything that can collapse collapsed, then grown from there.
+			for id := 1; id <= nPanes; id++ {
+				if ladder(id)[0] == sizeMin {
+					m.ui.Size[id] = sizeMin
+				}
+			}
+			for id := 1; id <= nPanes; id++ {
+				m.ui.Focus = id
+				checkFrame(t, m.render(now), size[0], size[1], fmt.Sprintf("all minimized, focus %d", id))
+			}
+			m.ui.Focus = pRoster
+			m.ui.Size[pRoster] = sizeWide
+			checkFrame(t, m.render(now), size[0], size[1], "all minimized, roster wide")
+			for id := range m.ui.Size {
+				m.ui.Size[id] = sizeNormal
 			}
 		}
 		frames++
@@ -127,18 +143,22 @@ func TestPanelKeys(t *testing.T) {
 	m := newModel(context.Background(), Options{Backend: &Demo{}, State: demoState()})
 	m.w, m.h = 200, 56
 	press(m, "2", "+")
-	if m.ui.Focus != pOrbit || m.ui.Size[pOrbit] != sizeHalf {
-		t.Fatalf("2 +: focus %d size %s", m.ui.Focus, m.ui.Size[pOrbit])
+	if m.ui.Focus != pOrbit || m.ui.Size[pOrbit] != sizeWide {
+		t.Fatalf("2 +: the orbit has no column, focus %d size %s", m.ui.Focus, m.ui.Size[pOrbit])
 	}
 	press(m, "+", "+")
 	if m.ui.Size[pOrbit] != sizeFull {
 		t.Fatalf("+ stops at full, got %s", m.ui.Size[pOrbit])
 	}
 	press(m, "_")
-	if m.ui.Size[pOrbit] != sizeHalf {
+	if m.ui.Size[pOrbit] != sizeWide {
 		t.Fatalf("_ shrinks, got %s", m.ui.Size[pOrbit])
 	}
-	press(m, "esc")
+	press(m, "-", "-")
+	if m.ui.Size[pOrbit] != sizeNormal {
+		t.Fatalf("the orbit never minimizes, got %s", m.ui.Size[pOrbit])
+	}
+	press(m, "+", "esc")
 	if m.ui.Size[pOrbit] != sizeNormal {
 		t.Fatalf("esc goes back to normal, got %s", m.ui.Size[pOrbit])
 	}
@@ -149,6 +169,48 @@ func TestPanelKeys(t *testing.T) {
 	press(m, "shift+tab", "shift+tab", "shift+tab")
 	if m.ui.Focus != nPanes {
 		t.Fatalf("shift+tab wraps: focus %d", m.ui.Focus)
+	}
+
+	// Commits grow into the plan's room, then the orbit's.
+	press(m, "5", "+")
+	out := stripANSI(m.render(time.Now()))
+	if m.ui.Size[pCommits] != sizeColumn || !strings.Contains(out, "▸ 1 PLAN") || !strings.Contains(out, "ORBIT") {
+		t.Fatalf("5 +: the plan collapses to a bar, the orbit stays (size %s):\n%s", m.ui.Size[pCommits], out)
+	}
+	press(m, "+")
+	out = stripANSI(m.render(time.Now()))
+	if m.ui.Size[pCommits] != sizeWide || strings.Contains(out, "ORBIT") || !strings.Contains(out, "ROSTER") {
+		t.Fatalf("5 + +: the orbit gives its width, the right column stays (size %s):\n%s", m.ui.Size[pCommits], out)
+	}
+	// The roster takes the agent's and shells' room first.
+	press(m, "7", "+")
+	out = stripANSI(m.render(time.Now()))
+	if m.ui.Size[pCommits] != sizeNormal {
+		t.Fatalf("focusing 7 resets the commits, got %s", m.ui.Size[pCommits])
+	}
+	if !strings.Contains(out, "▸ 3 AGENT") || !strings.Contains(out, "▸ 8 SHELLS") || !strings.Contains(out, "ORBIT") {
+		t.Fatalf("7 +: agent and shells collapse to bars:\n%s", out)
+	}
+
+	// Minimized stays minimized while cycling; one + brings it back.
+	press(m, "3", "-")
+	if m.ui.Size[pAgent] != sizeMin {
+		t.Fatalf("3 -: minimized, got %s", m.ui.Size[pAgent])
+	}
+	press(m, "1", "+", "tab", "tab")
+	if m.ui.Size[pAgent] != sizeMin || m.ui.Size[pPlan] != sizeNormal {
+		t.Fatalf("tab keeps the agent minimized (%s) and resets the plan (%s)", m.ui.Size[pAgent], m.ui.Size[pPlan])
+	}
+	if out = stripANSI(m.render(time.Now())); !strings.Contains(out, "▸ 3 AGENT") {
+		t.Fatalf("minimized agent bar missing:\n%s", out)
+	}
+	press(m, "+")
+	if m.ui.Focus != pAgent || m.ui.Size[pAgent] != sizeNormal {
+		t.Fatalf("+ on the bar opens it: focus %d size %s", m.ui.Focus, m.ui.Size[pAgent])
+	}
+	press(m, "4", "-")
+	if m.ui.Size[pComms] != sizeNormal {
+		t.Fatalf("comms never minimize, got %s", m.ui.Size[pComms])
 	}
 
 	// Comms: select, open, scroll, back.
@@ -219,7 +281,7 @@ func TestHelpSearch(t *testing.T) {
 func TestSnapshot(t *testing.T) {
 	path := os.Getenv("HALO_SNAP")
 	if path == "" {
-		t.Skip("set HALO_SNAP=out.html")
+		t.Skip("set HALO_SNAP=out.html (or out.txt for plain text)")
 	}
 	secs, _ := strconv.Atoi(os.Getenv("HALO_SNAP_SECONDS"))
 	if secs == 0 {
@@ -270,7 +332,11 @@ func TestSnapshot(t *testing.T) {
 		}
 		m.normalKey(k)
 	}
-	if err := os.WriteFile(path, []byte(toHTML(m.render(time.Now()))), 0o644); err != nil {
+	out := toHTML(m.render(time.Now()))
+	if strings.HasSuffix(path, ".txt") {
+		out = stripANSI(m.render(time.Now()))
+	}
+	if err := os.WriteFile(path, []byte(out), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }

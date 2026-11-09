@@ -41,7 +41,7 @@ halo              # first run asks for the server and the key
 
 ## Panels and keys
 
-Like lazygit: every panel has a number. `+` grows the focused panel to half the screen, then to all of it, and `enter` opens the selected item.
+Like lazygit: every panel has a number and `enter` opens the selected item. `+` grows the focused panel into the space next to it: first its whole column (the panels above and below collapse to one-line bars), then the orbit's width too, then the whole screen. `-` below normal collapses a panel to a one-line bar with a summary, which stays closed while you cycle with `tab`; one `+` brings it back. Moving the focus puts grown panels back to normal. The orbit and comms never collapse.
 
 | Panel | Shows | `enter` opens |
 |---|---|---|
@@ -57,7 +57,7 @@ Like lazygit: every panel has a number. `+` grows the focused panel to half the 
 | Key | Does |
 |---|---|
 | `1`–`8`, `tab` | focus a panel |
-| `+` / `_` | grow / shrink it: normal → half → full |
+| `+` / `-` | grow / shrink it: bar → normal → column → wide → full |
 | `j` `k` `g` `G` `ctrl+d` `ctrl+u` | move, scroll |
 | `enter` / `esc` | open / back |
 | `i` | prompt the lead |
