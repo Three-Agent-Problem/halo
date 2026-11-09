@@ -51,7 +51,7 @@ Like lazygit: every panel has a number and `enter` opens the selected item. `+` 
 | `4` comms | agent ⇄ agent messages, wrapped (`f` filters by agent) | the whole message |
 | `5` commits | the run's commits as a branch graph, live: one lane per subtask branch, colored by its worker's model, merges as `◆`; grown: stats, refs, a legend | the diff (`[` `]` previous/next) |
 | `6` events | the raw Lagrange activity feed | the entry as JSON |
-| `7` roster | the team; `n` add · `m` model · `d d` remove · `R` restart | (watch that agent in 3) |
+| `7` roster | the team, with each agent's cost and context fill (Claude Code's estimate at API prices; the team total is in the title); `n` add · `m` model · `d d` remove · `R` restart; grown: tokens and cost per session | (watch that agent in 3) |
 | `8` shells | every command the agents run and every server they leave up, with its ports; `o` opens the port, `d d` stops it and its children | the live output, command, cwd and ports |
 
 | Key | Does |

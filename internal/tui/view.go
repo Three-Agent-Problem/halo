@@ -279,7 +279,11 @@ func (s *State) summary(id int, sc Screen) string {
 				working++
 			}
 		}
-		return fmt.Sprintf("%d agents · %d working", len(s.Order), working)
+		out := fmt.Sprintf("%d agents · %d working", len(s.Order), working)
+		if t := s.TeamCost(); t > 0 {
+			out += " · " + money(t)
+		}
+		return out
 	}
 	return ""
 }

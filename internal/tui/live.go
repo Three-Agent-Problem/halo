@@ -23,6 +23,7 @@ import (
 // Claude Code streams while it works, before Lagrange sees any of it.
 type Update struct {
 	Agent, Task, Type string
+	Context           string // the A2A context: one ACP session per context
 	Raw               json.RawMessage
 	At                time.Time
 }
@@ -64,6 +65,16 @@ type acpUpdate struct {
 	RawInput      json.RawMessage `json:"rawInput"`
 	RawOutput     json.RawMessage `json:"rawOutput"`
 	Entries       []PlanEntry     `json:"entries"`
+	// usage_update: tokens in the context window, its size, and the session's
+	// cost so far (Claude Code's estimate at API prices).
+	Used int64    `json:"used"`
+	Size int64    `json:"size"`
+	Cost *acpCost `json:"cost"`
+}
+
+type acpCost struct {
+	Amount   float64 `json:"amount"`
+	Currency string  `json:"currency"`
 }
 
 var chunkKind = map[string]string{"agent_message_chunk": "say", "agent_thought_chunk": "think", "user_message_chunk": "user"}
@@ -133,6 +144,9 @@ func (s *State) Feed(u Update) {
 		} else if b.Output == "" {
 			b.Output = capTail(rawText(x.RawOutput))
 		}
+	case "usage_update":
+		a.usage(u.Context, x.Used, x.Size, x.Cost)
+		return
 	case "plan":
 		if b := last(); b != nil && b.Kind == "plan" && b.Task == u.Task {
 			b.Entries, b.Ended = x.Entries, at

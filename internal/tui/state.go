@@ -48,6 +48,7 @@ type Agent struct {
 	Log     []string
 	Since   time.Time
 	LastAct time.Time
+	Usage   Usage             // tokens and cost, for agents this Halo hosts
 	Feed    []*Block          // the live transcript, for agents this Halo hosts
 	tools   map[string]*Block // Feed's tool calls by id
 	active  map[string]bool   // tasks in progress

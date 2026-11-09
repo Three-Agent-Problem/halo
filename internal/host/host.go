@@ -40,7 +40,7 @@ func (h *Host) agent(handle string, logw io.Writer) a2aacp.Process {
 // with their output) to notify, then converts it as usual.
 func (h *Host) tap(handle string) a2aacp.Converter {
 	return a2aacp.ConverterFunc(func(ctx context.Context, ec *a2asrv.ExecutorContext, u a2aacp.Update) (*a2aacp.ConverterResult, error) {
-		h.notify(Event{Kind: "acp", Agent: handle, Text: u.Type, Task: string(ec.TaskID), Data: append(json.RawMessage(nil), u.Raw...)})
+		h.notify(Event{Kind: "acp", Agent: handle, Text: u.Type, Task: string(ec.TaskID), Context: ec.ContextID, Data: append(json.RawMessage(nil), u.Raw...)})
 		return a2aacp.ConvertUpdate(ctx, ec, u)
 	})
 }
@@ -103,6 +103,8 @@ type Event struct {
 	Agent string          // the handle, for "online" and "acp"
 	Text  string          // for "acp", the session update type
 	Task  string          // for "acp", the A2A task the agent works on
+	// Context is the A2A context of Task: one ACP session per context.
+	Context string
 	Data  json.RawMessage // for "acp", the session update as the agent sent it
 }
 

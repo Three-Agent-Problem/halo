@@ -632,6 +632,19 @@ func (s *State) rosterPane(w, h int, size Size, focused bool, sc Screen) (string
 	if focused {
 		right = c("dim", "enter watch")
 	}
+	costs := false
+	for _, hd := range s.Order {
+		if a := s.Agents[hd]; a != nil && (len(a.Usage.Sessions) > 0 || a.Usage.Size > 0) {
+			costs = true
+		}
+	}
+	title := c("hi!", "ROSTER")
+	if t := s.TeamCost(); t > 0 {
+		title += c("dim", " · team ") + c("hub!", money(t))
+		if size > sizeNormal {
+			title += c("dim", " · Claude Code's estimate at API prices")
+		}
+	}
 	items := make([][]string, len(s.Order))
 	for i, hd := range s.Order {
 		x := s.Agents[hd]
@@ -648,8 +661,25 @@ func (s *State) rosterPane(w, h int, size Size, focused bool, sc Screen) (string
 		if !x.Online && x.Role != "human" {
 			icon, k, st = "○", "dim", "offline"
 		}
-		item := []string{c(k+"!", icon) + " " + c(modelKey(x.Model), pad(s.Short(hd), 12)) + c("dim", pad(x.Model, 8)) + c(k, pad(st, 9)) + " " + c("dim", x.Sub)}
+		// The model column goes when the cost needs the room; the name's color
+		// still tells the model.
+		line := c(k+"!", icon) + " " + c(modelKey(x.Model), pad(s.Short(hd), 12))
+		if !costs || w >= 52 {
+			line += c("dim", pad(x.Model, 8))
+		}
+		stW := 9
+		if costs {
+			stW = 8
+		}
+		line += c(k, pad(st, stW)) + " " + c("dim", pad(x.Sub, 4))
+		if costs {
+			line += usageCell(x.Usage)
+		}
+		item := []string{line}
 		if size > sizeNormal {
+			if d := usageDetail(x.Usage); d != "" {
+				item = append(item, "    "+c("mute", d))
+			}
 			bits := []string{x.Role}
 			if !x.LastAct.IsZero() {
 				bits = append(bits, "active "+ago(sc.Now.Sub(x.LastAct)))
@@ -667,7 +697,7 @@ func (s *State) rosterPane(w, h int, size Size, focused bool, sc Screen) (string
 		}
 		items[i] = item
 	}
-	return c("hi!", "ROSTER"), right, listLines(items, sc.UI.Cur[pRoster], h, focused, false)
+	return title, right, listLines(items, sc.UI.Cur[pRoster], h, focused, false)
 }
 
 // ── detail views ─────────────────────────────────────────────────────────────

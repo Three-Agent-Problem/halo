@@ -59,7 +59,7 @@ func (t *team) start() {
 				t.note(e.Text)
 			case "acp":
 				select {
-				case t.feed <- tui.Update{Agent: e.Agent, Task: e.Task, Type: e.Text, Raw: e.Data, At: time.Now()}:
+				case t.feed <- tui.Update{Agent: e.Agent, Task: e.Task, Context: e.Context, Type: e.Text, Raw: e.Data, At: time.Now()}:
 				default: // the TUI is behind; drop rather than stall the agent
 				}
 			}

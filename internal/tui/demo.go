@@ -28,7 +28,9 @@ type Demo struct {
 	answer  chan string
 	commits []Commit
 	diffs   map[string]string
-	tips    map[string]string // branch → its newest fake commit
+	tips    map[string]string  // branch → its newest fake commit
+	spent   map[string]float64 // task → its fake session's cost
+	ctxUsed map[string]int64   // task → its fake context fill
 	feed    chan Update
 	shells  []Shell
 	outs    map[string]string
@@ -226,10 +228,36 @@ func (d *Demo) work(ctx context.Context, id string, tools []string, total time.D
 		sleep(ctx, step/3)
 		d.tool(ctx, agent, id, t, step*2/3+time.Duration(rand.IntN(400))*time.Millisecond)
 		d.state(id, "TASK_STATE_WORKING", "Finished "+t)
+		d.spend(agent, id)
 		if rand.IntN(2) == 0 {
 			d.art(id, id+"-r", "", "…", true)
 		}
 	}
+}
+
+// spend reports a usage update for the agent's session on task id, priced
+// roughly like its model.
+func (d *Demo) spend(agent, id string) {
+	price := map[string]float64{"haiku": .004, "sonnet": .03, "opus": .12}
+	step := .03
+	for m, p := range price {
+		if strings.Contains(agent, m) {
+			step = p
+		}
+	}
+	if agent == d.h("lead") {
+		step = price["opus"]
+	}
+	d.mu.Lock()
+	if d.spent == nil {
+		d.spent, d.ctxUsed = map[string]float64{}, map[string]int64{}
+	}
+	d.spent[id] += step * (.6 + rand.Float64())
+	d.ctxUsed[id] += 6000 + rand.Int64N(9000)
+	cost, used := d.spent[id], d.ctxUsed[id]
+	d.mu.Unlock()
+	d.raw(agent, id, map[string]any{"sessionUpdate": "usage_update", "used": used, "size": 200000,
+		"cost": map[string]any{"amount": cost, "currency": "USD"}})
 }
 
 func (d *Demo) reply(id, text string) {

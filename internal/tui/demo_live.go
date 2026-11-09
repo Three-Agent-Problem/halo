@@ -58,7 +58,7 @@ func (d *Demo) raw(agent, task string, v map[string]any) {
 	}
 	raw, _ := json.Marshal(v)
 	select {
-	case feed <- Update{Agent: agent, Task: task, Type: v["sessionUpdate"].(string), Raw: raw, At: time.Now()}:
+	case feed <- Update{Agent: agent, Task: task, Context: task, Type: v["sessionUpdate"].(string), Raw: raw, At: time.Now()}:
 	default:
 	}
 }
