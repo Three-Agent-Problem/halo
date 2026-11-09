@@ -231,6 +231,9 @@ func (s *State) runLines() []string {
 			}
 		}
 		branch = nonEmpty(s.Plan.Branch, "—")
+		if s.Plan.MergedInto != "" {
+			branch += " → " + s.Plan.MergedInto
+		}
 	}
 	row := func(k, v string) string { return c("dim", pad(k, 13)) + v }
 	return []string{
