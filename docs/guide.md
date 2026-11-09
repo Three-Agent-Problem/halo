@@ -13,7 +13,7 @@ From nothing to a merged run in about 10 minutes. Every step ends with **✅ You
  Step 8  It lands                merged into your branch
 ```
 
-**You need:** macOS or Linux, [Git](https://git-scm.com), [Go 1.26+](https://go.dev/dl/), [Node 20+](https://nodejs.org), [Docker](https://www.docker.com/products/docker-desktop/), and a Claude account for Claude Code.
+**You need:** macOS or Linux, [Git](https://git-scm.com), [Homebrew](https://brew.sh) (or Go 1.26+), [Node 20+](https://nodejs.org), [Docker](https://www.docker.com/products/docker-desktop/), and a Claude account for Claude Code.
 
 ---
 
@@ -63,11 +63,11 @@ Each agent on the team is a Claude Code session. Halo talks to it through the [A
 ## Step 3 · Install Halo
 
 ```sh
-go install github.com/three-agent-problem/halo/cmd/halo@latest
+brew install three-agent-problem/tap/halo
 halo --demo
 ```
 
-`go install` puts `halo` in `$(go env GOPATH)/bin` (usually `~/go/bin`), so that directory must be on your `PATH`.
+No Homebrew? Use `go install github.com/three-agent-problem/halo/cmd/halo@latest`, which puts `halo` in `$(go env GOPATH)/bin` (usually `~/go/bin`), so that directory must be on your `PATH`. Halo runs on macOS and Linux.
 
 ✅ **You should see:** the full TUI playing a scripted run. Press `a` when the lead asks something, `?` to see every key, and `q` then `y` to quit. Use a terminal of at least 160×44 for the full layout (80×24 is the minimum).
 
@@ -178,7 +178,7 @@ Then press `i` for the next prompt. It continues the same conversation, so the l
 | `checking the key on http://localhost:8080: …` | Is Lagrange up (`docker compose ps`)? Is the key copied whole, including `lgk_`? Is the URL the same one you log in with? |
 | The top bar says **watch-only** | Halo says why when it starts. "not in a git repository": `cd` into a repo. "online in another Halo": another Halo already hosts the team, so quit that one or keep watching from here. |
 | The agents never come online, or fail at once | Run `which claude-agent-acp` and check that `claude` is logged in (run `claude` and look for a login prompt). |
-| `halo: command not found` | Add `$(go env GOPATH)/bin` to your `PATH`. |
+| `halo: command not found` | With `go install`, add `$(go env GOPATH)/bin` to your `PATH`. |
 | Lagrange's Live page only updates on reload | A proxy is buffering server-sent events. Locally this doesn't happen. Behind nginx or Traefik, turn off buffering for `/api/events`. |
 | The final merge failed (conflict with your branch) | Fix your branch, then run `halo merge <run>`. `halo merge` alone lists runs. |
 | Start over with a different server or key | Delete `~/Library/Application Support/halo/state.json` (Linux: `~/.config/halo/state.json`) and run `halo` again. |

@@ -2,11 +2,13 @@
 
 # ◉ Halo
 
-**One prompt in. A team of Claude Code agents plans it, builds it, reviews it and merges it, while you watch every message live in your terminal.**
+**A team of Claude Code agents that work together over [A2A](https://a2a-protocol.org): a lead, workers on haiku, sonnet and opus, and a reviewer, each with its own address, delegating to each other in the open.**
 
-A halo orbit circles a Lagrange point. Halo's agents circle a [Lagrange](https://github.com/three-agent-problem/lagrange) server: every message between them is an [A2A](https://a2a-protocol.org) task you can watch, answer and replay.
+Most multi-agent coding tools are one process calling sub-agents behind a curtain. In Halo, every agent is a real A2A agent on a [Lagrange](https://github.com/three-agent-problem/lagrange) server, and so are you. When the lead delegates a subtask, a worker asks a question, the reviewer sends back CHANGES, or the lead asks you to approve the plan, that message is a durable A2A task between two addresses. You watch all of it live in your terminal, and you can replay it in Lagrange afterwards.
 
-[Step-by-step guide](docs/guide.md) · [Panels and keys](#panels-and-keys) · [How a run goes](#how-a-run-goes) · [Findings](FINDINGS.md)
+*A halo orbit circles a Lagrange point. Halo's agents circle a Lagrange server.*
+
+[Step-by-step guide](docs/guide.md) · [Why A2A](#why-a2a) · [Panels and keys](#panels-and-keys) · [How a run goes](#how-a-run-goes) · [Findings](FINDINGS.md)
 
 ![Halo in the middle of a run: the plan on the left, every message orbiting Lagrange in the middle, the reviewer's live output on the right, agent-to-agent comms below](docs/screenshots/overview.png)
 
@@ -29,12 +31,23 @@ A halo orbit circles a Lagrange point. Halo's agents circle a [Lagrange](https:/
 4. **A reviewer reads every diff.** CHANGES sends the subtask back to the same worker in the same Claude session. A failure escalates it one model up (haiku → sonnet → opus).
 5. **It lands on your branch.** When every subtask is merged, Halo merges the run into the branch you started from and cleans up its worktrees.
 
-The whole time, every message goes through Lagrange, so the run is also a Lagrange run: open its web app to replay it step by step, see each HTTP exchange, or answer the lead from another device.
+## Why A2A
+
+Because every hop goes through A2A on Lagrange instead of a function call inside one process, you get more than a TUI:
+
+| | |
+|---|---|
+| **Every agent is an address** | `@halo-lead`, `@halo-sonnet-1` and the rest each get an A2A endpoint and an agent card at `/a/<handle>/.well-known/agent-card.json`. They are the same kind of thing as any other agent on the server. |
+| **Every hop is a task** | A delegation, a worker's question, a review or a merge conflict is an A2A task with a state (`WORKING`, `INPUT_REQUIRED`, `COMPLETED`, `FAILED`), its history and artifacts. Lagrange stores it in Postgres, so the task outlives the process that sent it. |
+| **You are an address too** | The plan approval is an `INPUT_REQUIRED` task sent to *you*. It waits in your Lagrange inbox, on the live graph, and in an email or Slack link that opens on your phone. Answer wherever you are, and the run goes on. |
+| **The team runs anywhere** | The agents connect out through Lagrange tunnels. Halo hosts them on your laptop, or `halo agents` runs them headless on a beefier box while you watch from anywhere with `halo -watch`. |
+| **Every run is replayable** | Lagrange's **Runs** page tells the run as numbered steps next to a sequence diagram, steps through it with `←`/`→`, and keeps every HTTP request and response behind each hop. |
+| **Nothing is locked in** | It's A2A from end to end: the open protocol, the official [a2a-go](https://github.com/a2aproject/a2a-go) SDK, and Claude Code over the [Agent Client Protocol](https://agentclientprotocol.com). |
 
 ## Try it in 10 seconds (no server, no agents)
 
 ```sh
-go install github.com/three-agent-problem/halo/cmd/halo@latest
+brew install three-agent-problem/tap/halo     # or: go install github.com/three-agent-problem/halo/cmd/halo@latest
 halo --demo
 ```
 
@@ -52,7 +65,7 @@ docker compose up -d            # http://localhost:8080
 
 # 2. Claude Code (logged in once) and its ACP adapter, then Halo
 npm i -g @agentclientprotocol/claude-agent-acp
-go install github.com/three-agent-problem/halo/cmd/halo@latest
+brew install three-agent-problem/tap/halo
 
 # 3. an API key: Lagrange → Settings → API keys → Create key
 
@@ -133,6 +146,7 @@ Once every subtask is merged, Halo merges `halo/<run>` into the branch you start
 | `halo init --server URL --key lgk_…` | Save the server and key, and create the addresses, without opening the TUI. |
 | `halo agents` | Run the team headless. |
 | `halo merge [run] [--keep]` | List finished runs, or merge one into the checked-out branch. |
+| `halo version` | The installed version. |
 
 ## Built on
 

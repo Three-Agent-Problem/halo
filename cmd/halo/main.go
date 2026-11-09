@@ -25,6 +25,9 @@ import (
 	"github.com/three-agent-problem/halo/internal/tui"
 )
 
+// Set by the release build (GoReleaser ldflags).
+var version, commit = "dev", ""
+
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -43,6 +46,9 @@ func run(ctx context.Context, args []string) error {
 			return agentsCmd(ctx, args[1:])
 		case "merge":
 			return mergeCmd(ctx, args[1:])
+		case "version", "--version", "-v":
+			fmt.Println("halo", version, commit)
+			return nil
 		case "help", "-h", "--help":
 			fmt.Println(`usage:
   halo init --server URL --key lgk_...   save the Lagrange server and an API key, create the addresses
@@ -50,7 +56,8 @@ func run(ctx context.Context, args []string) error {
   halo merge                              list finished runs (halo/<run> branches)
   halo merge <run> [--keep]               merge a run into the checked-out branch, then clean it up
   halo [-watch] [-since N]                the TUI; it hosts the team on this repository unless another halo does
-  halo --demo                             the TUI playing a scripted run, no server needed`)
+  halo --demo                             the TUI playing a scripted run, no server needed
+  halo version`)
 			return nil
 		}
 	}

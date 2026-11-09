@@ -4,3 +4,4 @@ spike-events.jsonl
 .halo/
 halo.yaml
 .serena/
+dist/
