@@ -67,8 +67,8 @@ func (a *Agent) refresh() {
 
 func (a *Agent) log(line string) {
 	a.Log = append(a.Log, line)
-	if len(a.Log) > 60 {
-		a.Log = a.Log[len(a.Log)-60:]
+	if len(a.Log) > 500 {
+		a.Log = a.Log[len(a.Log)-500:]
 	}
 }
 
@@ -94,13 +94,15 @@ func (t *Task) Answer() string {
 type Comm struct {
 	At             time.Time
 	Kind           string // task, ask, reply, review, fail, hub
-	From, To, Text string
+	From, To, Text string // Text is the whole message
+	Sub            string // the subtask it is about
 }
 
 // Raw is one line of the raw event tail.
 type Raw struct {
 	Seq                    int64
 	Kind, Who, State, Text string
+	E                      lg.Entry
 }
 
 // Packet is a message travelling from one address to another through the hub.
@@ -136,6 +138,7 @@ type State struct {
 	Follow    bool
 
 	Comms   []Comm
+	Commits []Commit
 	Raw     []Raw
 	Packets []Packet
 	Dots    []Dot
@@ -237,7 +240,7 @@ func (s *State) Apply(e lg.Entry, now time.Time) {
 			if from == "" {
 				from = t.Sender
 			}
-			s.comm(now, "task", from, t.Recipient, firstLine(nonEmpty(e.Str("content"), e.Summary)))
+			s.comm(now, "task", from, t.Recipient, nonEmpty(e.Str("content"), e.Summary), t.Sub)
 			if live {
 				s.packet(from, t.Recipient, "task", "↺ "+nonEmpty(t.Sub, "msg"), now)
 			}
@@ -245,8 +248,8 @@ func (s *State) Apply(e lg.Entry, now time.Time) {
 	case "message":
 		// A call that got a plain message back: the question and the answer at once.
 		kind := "ask"
-		s.comm(now, kind, e.Sender, e.Recipient, firstLine(nonEmpty(e.Str("request"), e.Summary)))
-		s.comm(now, "reply", e.Recipient, e.Sender, firstLine(nonEmpty(e.Str("replyContent"), e.Str("reply"))))
+		s.comm(now, kind, e.Sender, e.Recipient, nonEmpty(e.Str("request"), e.Summary), plan.ParseTag(e.Summary))
+		s.comm(now, "reply", e.Recipient, e.Sender, nonEmpty(e.Str("replyContent"), e.Str("reply")), plan.ParseTag(e.Summary))
 		s.Questions++
 		if live {
 			s.packet(e.Sender, e.Recipient, kind, "?", now)
@@ -256,7 +259,12 @@ func (s *State) Apply(e lg.Entry, now time.Time) {
 }
 
 func (s *State) startRun(e lg.Entry, now time.Time) {
-	s.Root, s.RootAt, s.RootEnd, s.RootState, s.Prompt = e.TaskID, now, time.Time{}, e.State, e.Summary
+	at := e.At
+	if at.IsZero() || at.After(now) {
+		at = now
+	}
+	s.Root, s.RootAt, s.RootEnd, s.RootState, s.Prompt = e.TaskID, at, time.Time{}, e.State, e.Summary
+	s.Commits = nil
 	s.Tasks = map[string]*Task{}
 	s.Plan, s.planArt = nil, ""
 	s.Packets, s.Dots = nil, nil
@@ -296,7 +304,7 @@ func (s *State) raw(e lg.Entry) {
 	case "message":
 		text = nonEmpty(e.Str("reply"), e.Summary)
 	}
-	s.Raw = append(s.Raw, Raw{Seq: e.Seq, Kind: e.Kind, Who: who, State: short(e.State), Text: firstLine(text)})
+	s.Raw = append(s.Raw, Raw{Seq: e.Seq, Kind: e.Kind, Who: who, State: short(e.State), Text: firstLine(text), E: e})
 	if len(s.Raw) > 200 {
 		s.Raw = s.Raw[len(s.Raw)-200:]
 	}
@@ -350,7 +358,7 @@ func (s *State) task(e lg.Entry, now time.Time, live bool) {
 		if t.ID == s.Root {
 			label = "PROMPT"
 		}
-		s.comm(now, t.Kind, from, to, firstLine(t.Summary))
+		s.comm(now, t.Kind, from, to, t.Summary, t.Sub)
 		if live {
 			s.packet(from, to, t.Kind, label, now)
 		}
@@ -391,7 +399,7 @@ func (s *State) task(e lg.Entry, now time.Time, live bool) {
 			a.State = "waiting"
 		} else {
 			// The agent asks its sender, e.g. a permission prompt.
-			s.comm(now, "ask", to, from, firstLine(nonEmpty(e.Summary, "needs input")))
+			s.comm(now, "ask", to, from, nonEmpty(e.Summary, "needs input"), t.Sub)
 			if live {
 				s.packet(to, from, "ask", "?", now)
 			}
@@ -404,7 +412,7 @@ func (s *State) task(e lg.Entry, now time.Time, live bool) {
 			delete(s.agent(from).asking, t.ID)
 			s.agent(from).refresh()
 		}
-		ans := firstLine(nonEmpty(t.Answer(), e.Summary))
+		ans := strings.TrimSpace(nonEmpty(t.Answer(), e.Summary))
 		kind := "reply"
 		switch {
 		case e.State != stCompleted:
@@ -429,7 +437,7 @@ func (s *State) task(e lg.Entry, now time.Time, live bool) {
 		case t.ID == s.Root:
 			label = "✓ RUN"
 		}
-		s.comm(now, kind, to, from, nonEmpty(ans, "done"))
+		s.comm(now, kind, to, from, nonEmpty(ans, "done"), t.Sub)
 		if live {
 			s.packet(to, from, kind, strings.TrimSpace(label), now)
 		}
@@ -508,21 +516,29 @@ func (s *State) setPlan(p *plan.Plan, now time.Time) {
 			continue
 		}
 		if was.Model != st.Model {
-			s.comm(now, "hub", "", "", fmt.Sprintf("↑ escalate %s %s → %s", st.ID, was.Model, st.Model))
+			s.comm(now, "hub", "", "", fmt.Sprintf("↑ escalate %s %s → %s", st.ID, was.Model, st.Model), st.ID)
 		}
 		if was.Status != st.Status {
 			switch st.Status {
 			case plan.Done:
-				s.comm(now, "hub", "", "", fmt.Sprintf("✓ %s merged into %s", st.ID, nonEmpty(p.Branch, "the run branch")))
+				s.comm(now, "hub", "", "", fmt.Sprintf("✓ %s merged into %s", st.ID, nonEmpty(p.Branch, "the run branch")), st.ID)
 			case plan.Conflict:
-				s.comm(now, "hub", "", "", "✗ "+st.ID+" merge conflict")
+				s.comm(now, "hub", "", "", "✗ "+st.ID+" merge conflict", st.ID)
 			}
 		}
 	}
 }
 
-func (s *State) comm(now time.Time, kind, from, to, text string) {
-	s.Comms = append(s.Comms, Comm{At: now, Kind: kind, From: from, To: to, Text: text})
+func (s *State) comm(now time.Time, kind, from, to, text string, sub ...string) {
+	text = strings.TrimSpace(text)
+	if len(text) > 8000 {
+		text = text[:8000] + "…"
+	}
+	c := Comm{At: now, Kind: kind, From: from, To: to, Text: text}
+	if len(sub) > 0 {
+		c.Sub = sub[0]
+	}
+	s.Comms = append(s.Comms, c)
 	if len(s.Comms) > 300 {
 		s.Comms = s.Comms[len(s.Comms)-300:]
 	}
@@ -549,11 +565,15 @@ func (s *State) focusOn(handle string, now time.Time) {
 }
 
 // CycleFocus moves the focus to the next agent and holds it there for a while.
-func (s *State) CycleFocus(now time.Time) {
+func (s *State) CycleFocus(now time.Time, dir ...int) {
+	step := 1
+	if len(dir) > 0 && dir[0] < 0 {
+		step = len(s.Order) - 1
+	}
 	for i, h := range s.Order {
 		if h == s.Focus {
 			for j := 1; j <= len(s.Order); j++ {
-				n := s.Order[(i+j)%len(s.Order)]
+				n := s.Order[(i+j*step)%len(s.Order)]
 				if n != s.Human {
 					s.Focus = n
 					break

@@ -25,6 +25,8 @@ type Demo struct {
 	tasks   map[string]demoTask
 	waiting *Wait
 	answer  chan string
+	commits []Commit
+	diffs   map[string]string
 }
 
 type demoTask struct{ parent, from, to string }
@@ -74,6 +76,49 @@ func (d *Demo) Cancel(context.Context, string) error { return nil }
 
 // Online implements Backend.
 func (d *Demo) Online(context.Context, []string) (int, error) { return 6, nil }
+
+// Commits implements Backend: the commits the scripted run made.
+func (d *Demo) Commits(context.Context, string, time.Time) ([]Commit, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]Commit(nil), d.commits...), nil
+}
+
+// Diff implements Backend.
+func (d *Demo) Diff(_ context.Context, sha string) (string, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.diffs[sha], nil
+}
+
+// commit records a fake commit with a plausible diff of files.
+func (d *Demo) commit(subject string, files ...string) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.diffs == nil {
+		d.diffs = map[string]string{}
+	}
+	sha := fmt.Sprintf("%016x%016x%08x", rand.Uint64(), rand.Uint64(), rand.Uint32())
+	c := Commit{SHA: sha, At: time.Now(), Author: "halo", Subject: subject, Files: len(files)}
+	if m := subRe.FindStringSubmatch(subject); m != nil {
+		c.Sub = m[1]
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "commit %s\nAuthor: halo\nDate:   just now\n\n    %s\n\n", sha, subject)
+	for _, f := range files {
+		add, del := 4+rand.IntN(30), rand.IntN(6)
+		c.Add, c.Del = c.Add+add, c.Del+del
+		fmt.Fprintf(&b, " %s | %d %s\n", f, add+del, strings.Repeat("+", min(add, 20))+strings.Repeat("-", del))
+	}
+	fmt.Fprintf(&b, " %d files changed, %d insertions(+), %d deletions(-)\n", len(files), c.Add, c.Del)
+	for _, f := range files {
+		fmt.Fprintf(&b, "\ndiff --git a/%s b/%s\nindex 3f2a1c0..9b8e7d4 100644\n--- a/%s\n+++ b/%s\n@@ -12,7 +12,14 @@ package main\n", f, f, f, f)
+		b.WriteString(" // existing code stays as it was\n-\treturn nil\n+\tif err := validate(in); err != nil {\n+\t\treturn fmt.Errorf(\"invalid input: %w\", err)\n+\t}\n+\treturn store.Save(ctx, in)\n }\n")
+	}
+	c.SHA = sha
+	d.commits = append(d.commits, c)
+	d.diffs[sha] = b.String()
+}
 
 func (d *Demo) send(e lg.Entry) {
 	d.mu.Lock()
@@ -134,7 +179,10 @@ func (d *Demo) reply(id, text string) {
 }
 
 func (d *Demo) run(ctx context.Context) {
-	root := fmt.Sprintf("demo-%04x", rand.IntN(0xffff))
+	root := fmt.Sprintf("demo-%06x", rand.IntN(0xffffff))
+	d.mu.Lock()
+	d.commits = nil
+	d.mu.Unlock()
 	lead, rev := d.h("lead"), d.h("reviewer")
 	h1, s1, s2, o1 := d.h("haiku-1"), d.h("sonnet-1"), d.h("sonnet-2"), d.h("opus-1")
 	p := &plan.Plan{
@@ -212,8 +260,10 @@ func (d *Demo) run(ctx context.Context) {
 
 	t1 := dispatch("S1", h1, "schema migration: tasks + task_events, with down")
 	d.work(ctx, t1, []string{"Read migrations/0006_links.sql", "Write migrations/0007_tasks.sql", "Bash go run ./cmd/migrate -dry"}, 4*time.Second)
+	d.commit("halo: S1 schema migration", "migrations/0007_tasks.sql", "migrations/0007_tasks.down.sql")
 	d.reply(t1, "Migration 0007 adds tasks and task_events, with a down migration.")
 	review("S1", "APPROVE. Up and down are symmetric.", []string{"Bash git diff halo/run..halo/S1", "Read migrations/0007_tasks.sql"})
+	d.commit("halo: merge S1 schema migration")
 	set("S1", plan.Done, "", "")
 
 	t2 := dispatch("S2", s1, "pg task store behind store.Store, SKIP LOCKED queue")
@@ -228,6 +278,7 @@ func (d *Demo) run(ctx context.Context) {
 	d.reply(q, "/api. Match platform/api.go; kaan asked for it.")
 	set("S3", plan.Running, "", "")
 	d.work(ctx, t3, []string{"Edit api/tasks.go", "Bash go test ./api/..."}, 3*time.Second)
+	d.commit("halo: S2 pg task store", "store/pg.go", "store/pg_test.go")
 	d.reply(t2, "Store uses FOR UPDATE SKIP LOCKED for the queue. 12 tests pass.")
 	review("S2", "CHANGES: tasks.context_id is filtered without an index.", []string{"Bash git diff halo/run..halo/S2", "Read store/pg.go"})
 	p.Get("S2").Round = 1
@@ -235,12 +286,16 @@ func (d *Demo) run(ctx context.Context) {
 	f2 := t2 + "-f"
 	d.task(f2, root, lead, s1, plan.Tag("S2")+"reviewer: add an index on tasks.context_id, then re-run the tests")
 	set("S2", plan.Running, s1, f2)
+	d.commit("halo: S3 /api/tasks routes", "api/tasks.go", "api/tasks_test.go", "api/routes.go")
 	d.reply(t3, "GET and POST /api/tasks are wired, 9 tests pass.")
 	review("S3", "APPROVE. Matches the platform conventions.", []string{"Bash git diff halo/run..halo/S3", "Read api/tasks.go"})
+	d.commit("halo: merge S3 /api/tasks routes")
 	set("S3", plan.Done, "", "")
 	d.work(ctx, f2, []string{"Edit migrations/0007_tasks.sql", "Bash go test ./store/..."}, 3*time.Second)
+	d.commit("halo: S2 pg task store", "migrations/0007_tasks.sql")
 	d.reply(f2, "Added tasks_context_id_idx. 13 tests pass.")
 	review("S2", "APPROVE. Index added.", []string{"Bash git diff halo/S2~1..halo/S2"})
+	d.commit("halo: merge S2 pg task store")
 	set("S2", plan.Done, "", "")
 
 	t4 := dispatch("S4", h1, "web form for new tasks, validate the title")
@@ -254,15 +309,20 @@ func (d *Demo) run(ctx context.Context) {
 	publish()
 	t4b := dispatch("S4", s2, "web form; haiku failed on empty-title validation, see its branch")
 	d.work(ctx, t4b, []string{"Read web/src/TaskForm.tsx", "Read api/tasks.go", "Edit web/src/TaskForm.tsx", "Bash npm test"}, 5*time.Second)
+	d.commit("halo: S4 web task form", "web/src/TaskForm.tsx", "web/src/TaskForm.test.tsx")
 	d.reply(t4b, "The form validates with the API's schema. 31 tests pass.")
 	review("S4", "APPROVE. Errors are accessible.", []string{"Bash git diff halo/run..halo/S4", "Read web/src/TaskForm.tsx"})
+	d.commit("halo: merge S4 web task form")
 	set("S4", plan.Done, "", "")
 
 	t5 := dispatch("S5", o1, "run every check on the run branch, fix what breaks")
 	d.work(ctx, t5, []string{"Bash go vet ./...", "Bash go test ./...", "Bash npm test", "Edit go.sum"}, 6*time.Second)
+	d.commit("halo: S5 integrate + checks", "go.sum")
+	d.commit("halo: merge S5 integrate + checks")
 	d.reply(t5, "All checks pass on "+p.Branch+": 48 Go tests, 31 web tests.")
 	set("S5", plan.Done, "", "")
 	d.state(root, "TASK_STATE_WORKING", "Finished mcp__halo__wait_events")
+	d.commit("halo: merge " + p.Branch)
 	p.MergedInto = "main"
 	publish()
 	d.reply(root, "Run complete: 5/5 merged into "+p.Branch+", then "+p.Branch+" merged into main. 2 review rounds on S2, S4 moved up from haiku to sonnet.")

@@ -76,7 +76,7 @@ func box(w, h int, title, right string, lines []string, hot bool) string {
 	}
 	bc := "line2"
 	if hot {
-		bc = "mute"
+		bc = "haiku"
 	}
 	top := c(bc, "┌─") + " " + title + " "
 	tail := ""

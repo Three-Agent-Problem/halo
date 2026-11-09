@@ -33,12 +33,17 @@ type Backend interface {
 	Cancel(ctx context.Context, taskID string) error
 	// Online counts the roster's agents with a tunnel up.
 	Online(ctx context.Context, handles []string) (int, error)
+	// Commits lists the commits of run short since it started.
+	Commits(ctx context.Context, short string, since time.Time) ([]Commit, error)
+	// Diff returns a commit's git show output.
+	Diff(ctx context.Context, sha string) (string, error)
 }
 
 // Live is the Backend of a Lagrange server.
 type Live struct {
 	Server, Key, Human, Lead string
-	Since                    int64 // where the stream starts: 0 replays everything
+	Repo                     string // the git repository the team works on
+	Since                    int64  // where the stream starts: 0 replays everything
 	c                        *client.Client
 }
 
@@ -114,4 +119,14 @@ func (l *Live) Online(ctx context.Context, handles []string) (int, error) {
 		}
 	}
 	return n, nil
+}
+
+// Commits implements Backend from the local git repository.
+func (l *Live) Commits(ctx context.Context, short string, since time.Time) ([]Commit, error) {
+	return GitCommits(ctx, l.Repo, short, since)
+}
+
+// Diff implements Backend.
+func (l *Live) Diff(ctx context.Context, sha string) (string, error) {
+	return GitShow(ctx, l.Repo, sha)
 }

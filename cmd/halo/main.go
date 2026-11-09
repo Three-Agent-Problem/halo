@@ -116,7 +116,7 @@ func tuiCmd(ctx context.Context, args []string) error {
 		human = me.User.Handle
 	}
 	return tui.Run(ctx, tui.Options{
-		Backend: &tui.Live{Server: st.Server, Key: st.Key, Human: human, Lead: cfg.Handle(cfg.Lead().Name), Since: *since},
+		Backend: &tui.Live{Server: st.Server, Key: st.Key, Human: human, Lead: cfg.Handle(cfg.Lead().Name), Since: *since, Repo: cfg.Repo},
 		State:   tui.NewState(cfg.Prefix, members(cfg, human)),
 		Server:  st.Server, Handles: handles,
 	})

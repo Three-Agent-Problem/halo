@@ -29,13 +29,17 @@ const (
 	modeNote
 )
 
+const promptHint = "describe what to build, then enter"
+
 type (
-	entryMsg  lg.Entry
-	tickMsg   time.Time
-	connMsg   struct{ ok bool }
-	waitsMsg  []Wait
-	onlineMsg int
-	doneMsg   struct {
+	entryMsg   lg.Entry
+	tickMsg    time.Time
+	connMsg    struct{ ok bool }
+	waitsMsg   []Wait
+	onlineMsg  int
+	commitsMsg []Commit
+	diffMsg    struct{ sha, text string }
+	doneMsg    struct {
 		what string
 		err  error
 	}
@@ -45,6 +49,7 @@ type (
 type model struct {
 	o         Options
 	st        *State
+	ui        *UI
 	w, h      int
 	frame     int
 	connected bool
@@ -59,13 +64,17 @@ type model struct {
 	ctx       context.Context
 }
 
-// Run starts the TUI and blocks until it quits.
-func Run(ctx context.Context, o Options) error {
+func newModel(ctx context.Context, o Options) *model {
 	in := textinput.New()
 	in.Prompt = ""
-	in.Placeholder = "describe what to build, then enter"
+	in.Placeholder = promptHint
 	in.CharLimit = 2000
-	m := &model{o: o, st: o.State, input: in, ctx: ctx}
+	return &model{o: o, st: o.State, ui: NewUI(), input: in, ctx: ctx}
+}
+
+// Run starts the TUI and blocks until it quits.
+func Run(ctx context.Context, o Options) error {
+	m := newModel(ctx, o)
 	p := tea.NewProgram(m, tea.WithContext(ctx))
 	go func() {
 		_ = o.Backend.Stream(ctx, func(e lg.Entry) { p.Send(entryMsg(e)) }, func(ok bool, _ error) { p.Send(connMsg{ok}) })
@@ -86,7 +95,7 @@ func (m *model) poll() tea.Cmd {
 }
 
 func (m *model) fetch() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		func() tea.Msg {
 			ctx, cancel := context.WithTimeout(m.ctx, 5*time.Second)
 			defer cancel()
@@ -104,7 +113,19 @@ func (m *model) fetch() tea.Cmd {
 				return nil
 			}
 			return onlineMsg(n)
+		},
+	}
+	if m.st.Root != "" {
+		short, since := RunShort(m.st.Root), m.st.RootAt
+		cmds = append(cmds, func() tea.Msg {
+			cs, err := m.o.Backend.Commits(m.ctx, short, since)
+			if err != nil {
+				return nil
+			}
+			return commitsMsg(cs)
 		})
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *model) Init() tea.Cmd { return tea.Batch(tick(), m.fetch(), m.poll()) }
@@ -115,7 +136,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
-		m.input.SetWidth(max(20, m.w-70))
+		m.input.SetWidth(max(20, m.w-60))
 	case tickMsg:
 		m.frame++
 		m.st.Prune(time.Time(msg))
@@ -126,7 +147,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case pollMsg:
 		return m, tea.Batch(m.fetch(), m.poll())
 	case entryMsg:
+		root := m.st.Root
 		m.st.Apply(lg.Entry(msg), time.Now())
+		if m.st.Root != root {
+			m.ui.Diffs = map[string]string{}
+			m.ui.Cur[pCommits] = &pcursor{follow: true}
+		}
 		if msg.Kind == "task" && msg.Recipient == m.st.Human {
 			return m, m.fetch()
 		}
@@ -139,6 +165,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case onlineMsg:
 		m.online = int(msg)
+	case commitsMsg:
+		m.st.SetCommits(msg)
+		return m, m.wantDiff()
+	case diffMsg:
+		m.ui.Diffs[msg.sha] = msg.text
 	case doneMsg:
 		if msg.err != nil {
 			m.say(msg.what + " failed: " + msg.err.Error())
@@ -152,10 +183,48 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// wantDiff loads the diff of the selected commit when its detail is open.
+func (m *model) wantDiff() tea.Cmd {
+	c := m.ui.Cur[pCommits]
+	if !c.detail || c.sel >= len(m.st.Commits) {
+		return nil
+	}
+	sha := m.st.Commits[c.sel].SHA
+	if _, ok := m.ui.Diffs[sha]; ok {
+		return nil
+	}
+	return func() tea.Msg {
+		text, err := m.o.Backend.Diff(m.ctx, sha)
+		if err != nil {
+			text = "git show failed: " + err.Error()
+		}
+		return diffMsg{sha, text}
+	}
+}
+
 func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := k.String()
 	if key == "ctrl+c" {
 		return m, tea.Quit
+	}
+	if m.ui.Help {
+		switch key {
+		case "esc":
+			m.ui.Help, m.ui.Query = false, ""
+		case "backspace":
+			if r := []rune(m.ui.Query); len(r) > 0 {
+				m.ui.Query = string(r[:len(r)-1])
+			}
+		case "ctrl+u":
+			m.ui.Query = ""
+		default:
+			if key == "?" && m.ui.Query == "" {
+				m.ui.Help = false
+			} else if t := k.Text; t != "" {
+				m.ui.Query += t
+			}
+		}
+		return m, nil
 	}
 	switch m.mode {
 	case modePrompt:
@@ -205,7 +274,7 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeAnswer
 			m.input.SetValue("")
 			m.input.Blur()
-			m.input.Placeholder = "describe what to build, then enter"
+			m.input.Placeholder = promptHint
 			return m, nil
 		case "enter":
 			if len(m.waits) == 0 {
@@ -218,7 +287,7 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 			m.input.SetValue("")
 			m.input.Blur()
-			m.input.Placeholder = "describe what to build, then enter"
+			m.input.Placeholder = promptHint
 			m.mode = modeNormal
 			m.waits = m.waits[1:]
 			return m, func() tea.Msg {
@@ -234,10 +303,23 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.input, cmd = m.input.Update(k)
 		return m, cmd
 	}
+	return m.normalKey(key)
+}
+
+func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
+	u := m.ui
+	n := m.st.Count(u.Focus, u)
+	page := max(3, (m.h-4)/2)
+	if len(key) == 1 && key[0] >= '1' && key[0] <= '0'+nPanes {
+		u.Focus = int(key[0] - '0')
+		return m, nil
+	}
 	switch key {
 	case "q":
 		return m, tea.Quit
-	case "enter", "i", "/":
+	case "?":
+		u.Help, u.Query = true, ""
+	case "i", "p":
 		m.mode = modePrompt
 		return m, m.input.Focus()
 	case "a":
@@ -247,7 +329,80 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.say("nothing waits on you")
 		}
 	case "tab":
-		m.st.CycleFocus(time.Now())
+		u.FocusNext(1)
+	case "shift+tab":
+		u.FocusNext(-1)
+	case "+", "=":
+		u.Grow()
+	case "_", "-":
+		u.Shrink()
+	case "j", "down":
+		u.Move(1, n)
+		return m, m.wantDiff()
+	case "k", "up":
+		u.Move(-1, n)
+		return m, m.wantDiff()
+	case "ctrl+d", "pgdown":
+		u.Move(page, n)
+	case "ctrl+u", "pgup":
+		u.Move(-page, n)
+	case "g", "home":
+		u.Top()
+	case "G", "end":
+		u.Bottom(n)
+	case "enter":
+		return m.open(n)
+	case "esc":
+		switch c := u.cur(); {
+		case c.detail:
+			c.detail = false
+		case u.Size[u.Focus] > sizeNormal:
+			u.Size[u.Focus] = sizeNormal
+		}
+	case "h", "left", "l", "right":
+		if u.Focus == pAgent {
+			d := 1
+			if key == "h" || key == "left" {
+				d = -1
+			}
+			m.st.CycleFocus(time.Now(), d)
+			u.Cur[pAgent] = &pcursor{follow: true}
+		}
+	case "f":
+		if u.Focus == pComms {
+			hs := m.st.commHandles()
+			next := ""
+			for i, h := range hs {
+				if u.Filter == "" {
+					next = h
+					break
+				}
+				if h == u.Filter && i+1 < len(hs) {
+					next = hs[i+1]
+					break
+				}
+			}
+			u.Filter = next
+			u.Cur[pComms] = &pcursor{follow: true}
+			if next == "" {
+				m.say("comms: everyone")
+			}
+		}
+	case "F":
+		if u.Focus == pComms {
+			u.Filter = ""
+			u.Cur[pComms] = &pcursor{follow: true}
+		}
+	case "[", "]":
+		if c := u.Cur[pCommits]; u.Focus == pCommits && c.detail {
+			d := 1
+			if key == "[" {
+				d = -1
+			}
+			c.sel = max(0, min(len(m.st.Commits)-1, c.sel+d))
+			c.follow, c.dOff = false, 0
+			return m, m.wantDiff()
+		}
 	case "x":
 		if m.st.Root == "" || terminal(m.st.RootState) {
 			return m, nil
@@ -263,22 +418,62 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// open opens the selected item of the focused panel.
+func (m *model) open(n int) (tea.Model, tea.Cmd) {
+	u := m.ui
+	c := u.cur()
+	switch u.Focus {
+	case pRoster:
+		if c.sel < len(m.st.Order) && m.st.Order[c.sel] != m.st.Human {
+			m.st.Focus = m.st.Order[c.sel]
+			m.st.manualFocus = time.Now().Add(time.Hour)
+			u.Focus, u.Cur[pAgent] = pAgent, &pcursor{follow: true}
+		}
+		return m, nil
+	case pOrbit:
+		u.Grow()
+		return m, nil
+	}
+	if n == 0 && u.Focus != pAgent {
+		if m.st.Root == "" {
+			m.mode = modePrompt
+			return m, m.input.Focus()
+		}
+		return m, nil
+	}
+	if c.follow && n > 0 {
+		c.sel = n - 1
+	}
+	c.follow, c.detail, c.dOff = false, true, 0
+	return m, m.wantDiff()
+}
+
 func (m *model) View() tea.View {
 	if m.w == 0 {
 		v := tea.NewView("")
 		v.AltScreen = true
 		return v
 	}
-	sc := Screen{W: m.w, H: m.h, Frame: m.frame, Now: time.Now(), Server: m.o.Server, Connected: m.connected,
-		Online: m.online, Waiting: len(m.waits), Flash: m.flash}
+	v := tea.NewView(m.render(time.Now()))
+	v.AltScreen = true
+	v.WindowTitle = "halo"
+	return v
+}
+
+func (m *model) render(now time.Time) string {
+	sc := Screen{W: m.w, H: m.h, Frame: m.frame, Now: now, Server: m.o.Server, Connected: m.connected,
+		Online: m.online, Waiting: len(m.waits), Flash: m.flash, UI: m.ui}
 	sc.Footer = m.footer()
 	if (m.mode == modeAnswer || m.mode == modeNote) && len(m.waits) > 0 {
 		sc.Bottom, sc.BottomTag = m.answerPane(), fmt.Sprintf("%s asks you", m.st.Short(m.waits[0].Asker))
 	}
-	v := tea.NewView(m.st.Render(sc))
-	v.AltScreen = true
-	v.WindowTitle = "halo"
-	return v
+	return m.st.Render(sc)
+}
+
+// paneKeys are the footer hints of the focused panel.
+var paneKeys = map[int][][2]string{
+	pPlan: {{"enter", "subtask"}}, pOrbit: {{"enter", "bigger"}}, pAgent: {{"h/l", "agent"}, {"enter", "answer"}},
+	pComms: {{"enter", "read"}, {"f", "filter"}}, pCommits: {{"enter", "diff"}}, pEvents: {{"enter", "json"}}, pRoster: {{"enter", "watch"}},
 }
 
 func (m *model) footer() string {
@@ -288,17 +483,28 @@ func (m *model) footer() string {
 	} else if len(m.waits) > 0 && m.mode == modeNormal {
 		alert = c("ask!", " A ▸ ANSWER ") + " "
 	}
+	k := func(key, what string) string { return c("mute!", key) + c("dim", " "+what+"  ") }
 	var keys string
-	switch m.mode {
-	case modePrompt:
-		keys = c("mute!", "⏎") + c("dim", " send  ") + c("mute!", "esc") + c("dim", " back")
-	case modeAnswer:
-		keys = c("mute!", "y") + c("dim", " approve  ") + c("mute!", "n") + c("dim", " reject  ") + c("mute!", "r") + c("dim", " reply  ") + c("mute!", "esc") + c("dim", " later")
-	case modeNote:
-		keys = c("mute!", "⏎") + c("dim", " send  ") + c("mute!", "esc") + c("dim", " back")
+	switch {
+	case m.ui.Help:
+		keys = k("type", "search") + k("esc", "close")
+	case m.mode == modePrompt || m.mode == modeNote:
+		keys = k("⏎", "send") + k("esc", "back")
+	case m.mode == modeAnswer:
+		keys = k("y", "approve") + k("n", "reject") + k("r", "reply") + k("esc", "later")
 	default:
-		keys = c("mute!", "⏎") + c("dim", " prompt  ") + c("mute!", "a") + c("dim", " answer  ") + c("mute!", "tab") + c("dim", " focus  ") +
-			c("mute!", "x") + c("dim", " cancel  ") + c("mute!", "q") + c("dim", " quit")
+		if m.ui.cur().detail {
+			keys = k("j/k", "scroll") + k("esc", "back")
+			if m.ui.Focus == pCommits {
+				keys += k("[ ]", "prev/next")
+			}
+		} else {
+			keys = k("1-7", "panel") + k("+/_", "size")
+			for _, h := range paneKeys[m.ui.Focus] {
+				keys += k(h[0], h[1])
+			}
+		}
+		keys += k("i", "prompt") + k("?", "keys") + k("q", "quit")
 	}
 	var prompt string
 	switch m.mode {
@@ -307,9 +513,9 @@ func (m *model) footer() string {
 	default:
 		text := m.st.Prompt
 		if text == "" {
-			text = "press enter to describe what to build"
+			text = "press i to describe what to build"
 		}
-		prompt = c("hub!", "› ") + c("mute", text)
+		prompt = c("hub!", "› ") + c("mute", fit(firstLine(text), max(20, m.w-110)))
 	}
 	return " " + alert + prompt + "  " + keys
 }
@@ -318,7 +524,7 @@ func (m *model) answerPane() string {
 	w := m.waits[0]
 	width := max(20, m.w-8)
 	var lines []string
-	for _, l := range strings.Split(wrap(w.Question, width), "\n") {
+	for _, l := range wrapLines(w.Question, width, 0) {
 		lines = append(lines, c("hi", l))
 	}
 	lines = append(lines, "", c("dim", "waiting "+mmss(time.Since(w.Since))+" · task "+w.TaskID))
@@ -332,23 +538,4 @@ func (m *model) answerPane() string {
 		lines = append(lines[:n-3], lines[len(lines)-3:]...)
 	}
 	return strings.Join(lines, "\n")
-}
-
-func wrap(s string, w int) string {
-	var out []string
-	for _, para := range strings.Split(s, "\n") {
-		line := ""
-		for _, word := range strings.Fields(para) {
-			if len(line)+len(word)+1 > w && line != "" {
-				out = append(out, line)
-				line = ""
-			}
-			if line != "" {
-				line += " "
-			}
-			line += word
-		}
-		out = append(out, line)
-	}
-	return strings.Join(out, "\n")
 }

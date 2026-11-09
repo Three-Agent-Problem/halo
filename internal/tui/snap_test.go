@@ -1,6 +1,7 @@
 package tui
 
 import (
+	tea "charm.land/bubbletea/v2"
 	"context"
 	"fmt"
 	"html"
@@ -27,43 +28,177 @@ func demoState() *State {
 	})
 }
 
-// TestDemoRenders plays part of the demo run and renders frames at a few sizes:
-// nothing may panic, and every line must be exactly as wide as the screen.
+// playDemo runs the demo into a model for d, then returns it with the lock held
+// by the caller's mu.
+func playDemo(t *testing.T, ctx context.Context, mu *sync.Mutex) (*model, *Demo) {
+	t.Helper()
+	d := &Demo{Human: "kaan", Prefix: "halo"}
+	m := newModel(context.Background(), Options{Backend: d, State: demoState(), Server: "localhost:8190"})
+	m.connected, m.online = true, 6
+	go d.Stream(ctx, func(e lg.Entry) { mu.Lock(); m.st.Apply(e, time.Now()); mu.Unlock() }, func(bool, error) {})
+	return m, d
+}
+
+// sync copies the demo's commits and diffs into the model, as polling would.
+func syncDemo(m *model, d *Demo) {
+	cs, _ := d.Commits(context.Background(), "", time.Time{})
+	m.st.SetCommits(cs)
+	for _, c := range cs {
+		m.ui.Diffs[c.SHA], _ = d.Diff(context.Background(), c.SHA)
+	}
+}
+
+func checkFrame(t *testing.T, out string, w, h int, what string) {
+	t.Helper()
+	lines := strings.Split(out, "\n")
+	if len(lines) != h {
+		t.Fatalf("%s %dx%d: %d lines", what, w, h, len(lines))
+	}
+	for i, l := range lines {
+		if got := ansiWidth(l); got != w {
+			t.Fatalf("%s %dx%d: line %d is %d wide: %q", what, w, h, i, got, stripANSI(l))
+		}
+	}
+}
+
+// TestDemoRenders plays part of the demo run and renders every panel at every
+// size, with and without its item open: nothing may panic, and every line must be
+// exactly as wide as the screen.
 func TestDemoRenders(t *testing.T) {
-	st := demoState()
 	var mu sync.Mutex
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
-	d := &Demo{Human: "kaan", Prefix: "halo"}
-	go d.Stream(ctx, func(e lg.Entry) { mu.Lock(); st.Apply(e, time.Now()); mu.Unlock() }, func(bool, error) {})
+	m, d := playDemo(t, ctx, &mu)
 	frames := 0
 	for ctx.Err() == nil {
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(250 * time.Millisecond)
 		mu.Lock()
 		now := time.Now()
-		st.Prune(now)
+		m.st.Prune(now)
+		syncDemo(m, d)
+		m.frame = frames
 		for _, size := range [][2]int{{200, 56}, {160, 44}, {100, 30}} {
-			out := st.Render(Screen{W: size[0], H: size[1], Frame: frames, Now: now, Server: "demo", Connected: true, Online: 6, Footer: "› prompt"})
-			lines := strings.Split(out, "\n")
-			if len(lines) != size[1] {
-				t.Fatalf("%dx%d: %d lines", size[0], size[1], len(lines))
-			}
-			for i, l := range lines {
-				if w := ansiWidth(l); w != size[0] {
-					t.Fatalf("%dx%d: line %d is %d wide: %q", size[0], size[1], i, w, stripANSI(l))
+			m.w, m.h = size[0], size[1]
+			for id := 1; id <= nPanes; id++ {
+				m.ui.Focus = id
+				for z := sizeNormal; z <= sizeFull; z++ {
+					m.ui.Size[id] = z
+					m.ui.Cur[id].detail = frames%2 == 1
+					m.ui.Help = id == pComms && z == sizeHalf
+					checkFrame(t, m.render(now), size[0], size[1], fmt.Sprintf("panel %d %s detail=%v", id, z, m.ui.Cur[id].detail))
 				}
+				m.ui.Size[id], m.ui.Cur[id].detail, m.ui.Help = sizeNormal, false, false
 			}
 		}
 		frames++
 		mu.Unlock()
 	}
-	if st.Plan == nil || len(st.Comms) < 3 {
-		t.Fatalf("the demo didn't get far: plan=%v comms=%d", st.Plan != nil, len(st.Comms))
+	mu.Lock()
+	defer mu.Unlock()
+	if m.st.Plan == nil || len(m.st.Comms) < 3 {
+		t.Fatalf("the demo didn't get far: plan=%v comms=%d", m.st.Plan != nil, len(m.st.Comms))
+	}
+}
+
+func press(m *model, keys ...string) {
+	for _, k := range keys {
+		m.normalKey(k)
+	}
+}
+
+func TestPanelKeys(t *testing.T) {
+	m := newModel(context.Background(), Options{Backend: &Demo{}, State: demoState()})
+	m.w, m.h = 200, 56
+	press(m, "2", "+")
+	if m.ui.Focus != pOrbit || m.ui.Size[pOrbit] != sizeHalf {
+		t.Fatalf("2 +: focus %d size %s", m.ui.Focus, m.ui.Size[pOrbit])
+	}
+	press(m, "+", "+")
+	if m.ui.Size[pOrbit] != sizeFull {
+		t.Fatalf("+ stops at full, got %s", m.ui.Size[pOrbit])
+	}
+	press(m, "_")
+	if m.ui.Size[pOrbit] != sizeHalf {
+		t.Fatalf("_ shrinks, got %s", m.ui.Size[pOrbit])
+	}
+	press(m, "esc")
+	if m.ui.Size[pOrbit] != sizeNormal {
+		t.Fatalf("esc goes back to normal, got %s", m.ui.Size[pOrbit])
+	}
+	press(m, "tab")
+	if m.ui.Focus != pAgent {
+		t.Fatalf("tab: focus %d", m.ui.Focus)
+	}
+	press(m, "shift+tab", "shift+tab", "shift+tab")
+	if m.ui.Focus != nPanes {
+		t.Fatalf("shift+tab wraps: focus %d", m.ui.Focus)
+	}
+
+	// Comms: select, open, scroll, back.
+	for i := 0; i < 5; i++ {
+		m.st.comm(time.Now(), "task", "halo-lead", "halo-sonnet-1", strings.Repeat("word ", 400), "S1")
+	}
+	press(m, "4", "k", "k")
+	c := m.ui.Cur[pComms]
+	if c.follow || c.sel != 2 {
+		t.Fatalf("k k from the newest: sel %d follow %v", c.sel, c.follow)
+	}
+	press(m, "enter", "j", "j")
+	if !c.detail || c.dOff != 2 || c.sel != 2 {
+		t.Fatalf("enter j j: detail %v dOff %d sel %d", c.detail, c.dOff, c.sel)
+	}
+	press(m, "esc")
+	if c.detail {
+		t.Fatal("esc closes the message")
+	}
+	press(m, "G")
+	if !c.follow || c.sel != 4 {
+		t.Fatalf("G follows the newest: sel %d follow %v", c.sel, c.follow)
+	}
+	press(m, "f")
+	if m.ui.Filter != "halo-lead" {
+		t.Fatalf("f filters by the first agent, got %q", m.ui.Filter)
+	}
+	press(m, "F")
+	if m.ui.Filter != "" {
+		t.Fatal("F clears the filter")
+	}
+
+	press(m, "?")
+	if !m.ui.Help {
+		t.Fatal("? opens the help")
+	}
+	for _, r := range "diff" {
+		m.key(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	if m.ui.Query != "diff" {
+		t.Fatalf("typing searches, query %q", m.ui.Query)
+	}
+	m.key(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.ui.Help || m.ui.Query != "" {
+		t.Fatal("esc closes the help")
+	}
+}
+
+func TestHelpSearch(t *testing.T) {
+	all := len(helpLines("", 90))
+	got := helpLines("diff", 90)
+	if len(got) >= all || len(got) < 2 {
+		t.Fatalf("diff: %d lines of %d", len(got), all)
+	}
+	for _, l := range got {
+		if p := stripANSI(l); p != "" && !strings.Contains(strings.ToLower(p), "commits") && !matches(p, "diff") {
+			t.Errorf("%q doesn't match diff", p)
+		}
+	}
+	if got := helpLines("zzzz", 90); len(got) != 1 {
+		t.Fatalf("no match: %v", got)
 	}
 }
 
 // TestSnapshot writes an HTML screenshot of the demo after HALO_SNAP_SECONDS (default
-// 20) to $HALO_SNAP. Skipped unless HALO_SNAP is set.
+// 20) to $HALO_SNAP, after pressing HALO_SNAP_KEYS (space separated, e.g. "5 enter").
+// Skipped unless HALO_SNAP is set.
 func TestSnapshot(t *testing.T) {
 	path := os.Getenv("HALO_SNAP")
 	if path == "" {
@@ -73,33 +208,43 @@ func TestSnapshot(t *testing.T) {
 	if secs == 0 {
 		secs = 20
 	}
-	st := demoState()
 	var mu sync.Mutex
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	d := &Demo{Human: "kaan", Prefix: "halo"}
-	go d.Stream(ctx, func(e lg.Entry) { mu.Lock(); st.Apply(e, time.Now()); mu.Unlock() }, func(bool, error) {})
+	m, d := playDemo(t, ctx, &mu)
 	end := time.Now().Add(time.Duration(secs) * time.Second)
-	frame := 0
 	for time.Now().Before(end) {
 		time.Sleep(80 * time.Millisecond)
 		mu.Lock()
-		st.Prune(time.Now())
+		m.st.Prune(time.Now())
+		m.frame++
 		mu.Unlock()
-		frame++
 	}
 	mu.Lock()
 	defer mu.Unlock()
-	w, h := 210, 58
+	m.w, m.h = 210, 58
 	if v, _ := strconv.Atoi(os.Getenv("HALO_SNAP_W")); v > 0 {
-		w = v
+		m.w = v
 	}
 	if v, _ := strconv.Atoi(os.Getenv("HALO_SNAP_H")); v > 0 {
-		h = v
+		m.h = v
 	}
-	out := st.Render(Screen{W: w, H: h, Frame: frame, Now: time.Now(), Server: "localhost:8190", Connected: true, Online: 6,
-		Waiting: boolInt(d.waiting != nil), Footer: " " + c("hub!", "› ") + c("mute", st.Prompt) + "  " + c("mute!", "⏎") + c("dim", " prompt  ") + c("mute!", "a") + c("dim", " answer  ") + c("mute!", "tab") + c("dim", " focus  ") + c("mute!", "q") + c("dim", " quit")})
-	if err := os.WriteFile(path, []byte(toHTML(out)), 0o644); err != nil {
+	syncDemo(m, d)
+	if ws, _ := d.Waiting(ctx); len(ws) > 0 {
+		m.waits = ws
+	}
+	for _, k := range strings.Fields(os.Getenv("HALO_SNAP_KEYS")) {
+		if k == "?" {
+			m.ui.Help = true
+			continue
+		}
+		if q, ok := strings.CutPrefix(k, "?"); ok {
+			m.ui.Help, m.ui.Query = true, q
+			continue
+		}
+		m.normalKey(k)
+	}
+	if err := os.WriteFile(path, []byte(toHTML(m.render(time.Now()))), 0o644); err != nil {
 		t.Fatal(err)
 	}
 }
