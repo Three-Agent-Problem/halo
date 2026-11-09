@@ -3,6 +3,7 @@ package host
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -192,7 +193,7 @@ func (l *lead) question(ctx context.Context, ec *a2asrv.ExecutorContext, m meta)
 
 // event is something wait_events hands the lead.
 type event struct {
-	Kind     string `json:"kind"` // question, human, subtask_done, subtask_failed, review, conflict
+	Kind     string `json:"kind"` // question, human, subtask_done, subtask_failed, review, conflict, merged
 	ID       string `json:"id,omitempty"`
 	Subtask  string `json:"subtask,omitempty"`
 	From     string `json:"from,omitempty"`
@@ -215,7 +216,9 @@ type run struct {
 	mu        sync.Mutex
 	plan      *plan.Plan
 	branch    string
+	base      string // the branch checked out when the plan was approved; "" on a detached HEAD
 	runDir    string
+	landing   landState
 	ec        *a2asrv.ExecutorContext
 	emit      chan a2a.Event
 	events    chan event
@@ -223,6 +226,29 @@ type run struct {
 	qseq      int
 	approval  string // the task asking for plan approval
 	subs      map[string]*subRT
+}
+
+// landState is how far merging the finished run branch into base got. It only ever
+// moves forward, so the run is landed at most once.
+type landState int
+
+const (
+	landNone    landState = iota
+	landRunning           // every subtask is done; Land and Cleanup are running
+	landFailed            // Land failed; the run branch and worktrees are kept
+	landMerged            // merged into base and cleaned up; the run is finished
+)
+
+// openLocked refuses tools that change the run once it is being merged or merged.
+// Callers hold r.mu.
+func (r *run) openLocked() error {
+	switch r.landing {
+	case landRunning:
+		return fmt.Errorf("every subtask is done and halo is merging %s into %s; wait for the merged event", r.branch, r.base)
+	case landMerged:
+		return errors.New("the run is merged and finished")
+	}
+	return nil
 }
 
 // attach makes ec the execution plan updates are streamed into.

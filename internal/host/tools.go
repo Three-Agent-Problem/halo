@@ -144,9 +144,23 @@ func (h *Host) leadMCP() http.Handler {
 			}
 			return nil, errors.New("this session has no run")
 		}
+		// open is get for the tools that change the run: they stop working once
+		// the finished run is being merged into its base branch.
+		open := func() (*run, error) {
+			r, err := get()
+			if err != nil {
+				return nil, err
+			}
+			r.mu.Lock()
+			defer r.mu.Unlock()
+			if err := r.openLocked(); err != nil {
+				return nil, err
+			}
+			return r, nil
+		}
 		mcp.AddTool(s, &mcp.Tool{Name: "publish_plan", Description: "Publish (or, before approval, replace) the run's plan. Everyone watching sees it."},
 			func(ctx context.Context, _ *mcp.CallToolRequest, in planIn) (*mcp.CallToolResult, out, error) {
-				r, err := get()
+				r, err := open()
 				if err != nil {
 					return nil, out{}, err
 				}
@@ -154,7 +168,7 @@ func (h *Host) leadMCP() http.Handler {
 			})
 		mcp.AddTool(s, &mcp.Tool{Name: "ask_human", Description: "Ask the person a question in their Lagrange inbox. Returns at once; the answer arrives through wait_events (kind human)."},
 			func(ctx context.Context, _ *mcp.CallToolRequest, in askHumanIn) (*mcp.CallToolResult, out, error) {
-				r, err := get()
+				r, err := open()
 				if err != nil {
 					return nil, out{}, err
 				}
@@ -162,7 +176,7 @@ func (h *Host) leadMCP() http.Handler {
 			})
 		mcp.AddTool(s, &mcp.Tool{Name: "delegate", Description: "Send a subtask to a free worker of its model, in a fresh git worktree of the run branch. Returns at once; the result arrives through wait_events."},
 			func(ctx context.Context, _ *mcp.CallToolRequest, in delegateIn) (*mcp.CallToolResult, out, error) {
-				r, err := get()
+				r, err := open()
 				if err != nil {
 					return nil, out{}, err
 				}
@@ -170,7 +184,7 @@ func (h *Host) leadMCP() http.Handler {
 			})
 		mcp.AddTool(s, &mcp.Tool{Name: "follow_up", Description: "Send more work to the worker that did a subtask, in the same Claude session and worktree (it remembers the subtask)."},
 			func(ctx context.Context, _ *mcp.CallToolRequest, in followIn) (*mcp.CallToolResult, out, error) {
-				r, err := get()
+				r, err := open()
 				if err != nil {
 					return nil, out{}, err
 				}
@@ -178,7 +192,7 @@ func (h *Host) leadMCP() http.Handler {
 			})
 		mcp.AddTool(s, &mcp.Tool{Name: "request_review", Description: "Send a finished subtask's diff to the reviewer. APPROVE merges it into the run branch; CHANGES comes back as a review event."},
 			func(ctx context.Context, _ *mcp.CallToolRequest, in idIn) (*mcp.CallToolResult, out, error) {
-				r, err := get()
+				r, err := open()
 				if err != nil {
 					return nil, out{}, err
 				}
@@ -186,7 +200,7 @@ func (h *Host) leadMCP() http.Handler {
 			})
 		mcp.AddTool(s, &mcp.Tool{Name: "accept", Description: "Merge a finished subtask into the run branch without (more) review."},
 			func(ctx context.Context, _ *mcp.CallToolRequest, in idIn) (*mcp.CallToolResult, out, error) {
-				r, err := get()
+				r, err := open()
 				if err != nil {
 					return nil, out{}, err
 				}
@@ -194,13 +208,13 @@ func (h *Host) leadMCP() http.Handler {
 			})
 		mcp.AddTool(s, &mcp.Tool{Name: "escalate", Description: "Move a subtask one model up (haiku → sonnet → opus) and send it to a worker of that model in a fresh worktree."},
 			func(ctx context.Context, _ *mcp.CallToolRequest, in escalateIn) (*mcp.CallToolResult, out, error) {
-				r, err := get()
+				r, err := open()
 				if err != nil {
 					return nil, out{}, err
 				}
 				return r.escalate(ctx, in.SubtaskID, in.Reason)
 			})
-		mcp.AddTool(s, &mcp.Tool{Name: "wait_events", Description: "Wait for what happened next: worker questions, finished or failed subtasks, reviews, merge conflicts, answers from the person. Call it in a loop until every subtask is done."},
+		mcp.AddTool(s, &mcp.Tool{Name: "wait_events", Description: "Wait for what happened next: worker questions, finished or failed subtasks, reviews, merge conflicts, answers from the person, and finally the merged event (halo merging the finished run branch into the base branch, or why it couldn't). Call it in a loop until the merged event arrives."},
 			func(ctx context.Context, _ *mcp.CallToolRequest, in waitIn) (*mcp.CallToolResult, out, error) {
 				r, err := get()
 				if err != nil {
@@ -321,13 +335,16 @@ func (r *run) askHuman(ctx context.Context, in askHumanIn) (*mcp.CallToolResult,
 }
 
 func (r *run) approve(ctx context.Context) error {
+	// The branch checked out now is what the finished run is merged into. On a
+	// detached HEAD there is none, and the run branch is left for a manual merge.
+	base, _ := r.l.h.wt.base(ctx)
 	branch, dir, err := r.l.h.wt.runBranch(ctx, r.short)
 	if err != nil {
 		return err
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.branch, r.runDir = branch, dir
+	r.branch, r.runDir, r.base = branch, dir, base
 	r.plan.Approved, r.plan.Branch = true, branch
 	r.publishLocked()
 	return nil
@@ -532,9 +549,15 @@ func (r *run) requestReview(ctx context.Context, id string) (*mcp.CallToolResult
 		}
 		if strings.HasPrefix(strings.ToUpper(strings.TrimSpace(verdict)), "APPROVE") {
 			approved := true
-			msg, kind := r.mergeSub(h.ctx, sid)
-			r.push(event{Kind: kind, Subtask: sid, From: "@" + reviewer, Text: clip(verdict, 1200) + "\n\n" + msg, Approved: &approved,
-				Hint: map[string]string{"review": "delegate what this unblocked", "conflict": "follow_up the worker: merge the run branch into its branch and resolve"}[kind]})
+			msg, kind, land := r.mergeSub(h.ctx, sid)
+			hint := map[string]string{"review": "delegate what this unblocked", "conflict": "follow_up the worker: merge the run branch into its branch and resolve"}[kind]
+			if land {
+				hint = "every subtask is done: wait_events for the merged event"
+			}
+			r.push(event{Kind: kind, Subtask: sid, From: "@" + reviewer, Text: clip(verdict, 1200) + "\n\n" + msg, Approved: &approved, Hint: hint})
+			if land {
+				r.land(h.ctx)
+			}
 			return
 		}
 		approved := false
@@ -553,10 +576,16 @@ func statusOf(s *plan.Subtask) string {
 }
 
 // mergeSub merges a subtask into the run branch. It returns a message and the
-// event kind: "review" when merged, "conflict" when not.
-func (r *run) mergeSub(ctx context.Context, id string) (string, string) {
+// event kind: "review" when merged, "conflict" when not. land is true when this
+// merge finished the last subtask: the caller then calls r.land (after pushing its
+// own event, so the lead sees the merged event last). It is true once per run.
+func (r *run) mergeSub(ctx context.Context, id string) (msg, kind string, land bool) {
 	r.mu.Lock()
-	rt, runDir := r.rt(id), r.runDir
+	if err := r.openLocked(); err != nil {
+		r.mu.Unlock()
+		return err.Error(), "conflict", false
+	}
+	rt, runDir, branch := r.rt(id), r.runDir, r.branch
 	title := ""
 	if s := r.planGet(id); s != nil {
 		title = s.Title
@@ -566,10 +595,93 @@ func (r *run) mergeSub(ctx context.Context, id string) (string, string) {
 	if err != nil || conflicts != "" {
 		why := nonEmpty(conflicts, fmt.Sprint(err))
 		r.update(id, func(s *plan.Subtask) { s.Status, s.Note = plan.Conflict, "conflict: "+firstLine(why) })
-		return "Merge into " + r.branch + " failed: " + why, "conflict"
+		return "Merge into " + branch + " failed: " + why, "conflict", false
 	}
-	r.update(id, func(s *plan.Subtask) { s.Status, s.EndedAt = plan.Done, time.Now().UnixMilli() })
-	return "Merged into " + r.branch + ".", "review"
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if s := r.planGet(id); s != nil {
+		s.Status, s.EndedAt = plan.Done, time.Now().UnixMilli()
+		r.publishLocked()
+	}
+	msg = "Merged into " + branch + "."
+	if r.landing == landNone && allDone(r.plan) {
+		r.landing = landRunning
+		msg += " Every subtask is done: halo is merging " + branch + " into " + nonEmpty(r.base, "the base branch") + "; the merged event follows."
+		return msg, "review", true
+	}
+	return msg, "review", false
+}
+
+// allDone reports whether p is approved and every subtask in it is merged into the
+// run branch.
+func allDone(p *plan.Plan) bool {
+	if p == nil || !p.Approved || len(p.Subtasks) == 0 {
+		return false
+	}
+	for _, s := range p.Subtasks {
+		if s.Status != plan.Done {
+			return false
+		}
+	}
+	return true
+}
+
+// canLand reports why the run branch can't be merged into base yet, or nil when
+// every subtask is done and base is known.
+func canLand(p *plan.Plan, base string) error {
+	if p == nil || !p.Approved {
+		return errors.New("the plan isn't approved")
+	}
+	if !allDone(p) {
+		var open []string
+		for _, s := range p.Subtasks {
+			if s.Status != plan.Done {
+				open = append(open, s.ID+" "+s.Status)
+			}
+		}
+		return fmt.Errorf("merge only when every subtask is done (%s)", strings.Join(open, ", "))
+	}
+	if base == "" {
+		return errors.New("there is no base branch: the repository had a detached HEAD when the plan was approved")
+	}
+	return nil
+}
+
+// land merges the finished run branch into base, then removes the run's worktrees
+// and branches, and reports it as a merged event. On failure it keeps everything so
+// that the person can merge by hand. mergeSub makes sure it runs once per run; it
+// runs without r.mu, since Land and Cleanup can take a while.
+func (r *run) land(ctx context.Context) {
+	h := r.l.h
+	r.mu.Lock()
+	err := canLand(r.plan, r.base)
+	branch, base := r.branch, r.base
+	r.mu.Unlock()
+	var summary string
+	if err == nil {
+		summary, err = Land(ctx, h.cfg.Repo, branch, base)
+	}
+	if err != nil {
+		r.mu.Lock()
+		r.landing = landFailed
+		r.mu.Unlock()
+		merged := false
+		r.push(event{Kind: "merged", Text: fmt.Sprintf("halo couldn't merge %s into %s: %s", branch, nonEmpty(base, "a base branch"), err), Approved: &merged,
+			Hint: fmt.Sprintf("tell @%s the run branch %s is kept; after fixing it they can run `halo merge %s`", h.st.Human, branch, r.short)})
+		return
+	}
+	if cerr := Cleanup(ctx, h.cfg.Repo, r.short); cerr != nil {
+		h.log.Warn("cleanup after merge", "run", r.id, "err", cerr)
+		summary += "\n(the merge succeeded, but removing the run's worktrees didn't fully: " + cerr.Error() + ")"
+	}
+	r.mu.Lock()
+	r.landing, r.runDir = landMerged, ""
+	r.plan.MergedInto = base
+	r.publishLocked()
+	r.mu.Unlock()
+	merged := true
+	r.push(event{Kind: "merged", Text: summary, Approved: &merged,
+		Hint: "every subtask is done and the run is merged into " + base + "; reply with your summary"})
 }
 
 func (r *run) accept(ctx context.Context, id string) (*mcp.CallToolResult, out, error) {
@@ -581,7 +693,10 @@ func (r *run) accept(ctx context.Context, id string) (*mcp.CallToolResult, out, 
 	}
 	sid := s.ID
 	r.mu.Unlock()
-	msg, _ := r.mergeSub(ctx, sid)
+	msg, _, land := r.mergeSub(ctx, sid)
+	if land {
+		go r.land(r.l.h.ctx)
+	}
 	return ok("%s", msg)
 }
 
