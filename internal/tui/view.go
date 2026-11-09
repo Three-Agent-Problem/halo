@@ -133,11 +133,11 @@ func live(ok bool) string {
 }
 
 var statusIcon = map[string]string{
-	plan.Pending: "○", plan.Asking: "?", plan.Review: "◆", plan.Changes: "↺",
+	plan.Pending: "○", plan.Asking: "?", plan.Ready: "◇", plan.Review: "◆", plan.Changes: "↺",
 	plan.Done: "✓", plan.Failed: "✗", plan.Conflict: "✗",
 }
 var statusKey = map[string]string{
-	plan.Pending: "dim", plan.Running: "task", plan.Asking: "ask", plan.Review: "review",
+	plan.Pending: "dim", plan.Running: "task", plan.Asking: "ask", plan.Ready: "reply", plan.Review: "review",
 	plan.Changes: "ask", plan.Done: "reply", plan.Failed: "fail", plan.Conflict: "fail",
 }
 

@@ -18,6 +18,7 @@ const (
 	Pending  = "pending"  // waiting for approval or dependencies
 	Running  = "running"  // a worker has it
 	Asking   = "asking"   // its worker asked the lead something
+	Ready    = "ready"    // the worker finished; the lead decides what next
 	Review   = "review"   // the reviewer has it
 	Changes  = "changes"  // the reviewer asked for changes
 	Done     = "done"     // merged into the run's branch
@@ -88,8 +89,8 @@ func (p *Plan) Public() *Plan {
 	return &out
 }
 
-// Ready reports whether all of s's dependencies are done.
-func (p *Plan) Ready(s *Subtask) bool {
+// DepsDone reports whether all of s's dependencies are done.
+func (p *Plan) DepsDone(s *Subtask) bool {
 	for _, d := range s.Deps {
 		if dep := p.Get(d); dep == nil || dep.Status != Done {
 			return false
