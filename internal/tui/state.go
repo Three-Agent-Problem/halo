@@ -498,6 +498,9 @@ func (s *State) setPlan(p *plan.Plan, now time.Time) {
 	if p.Approved && !old.Approved {
 		s.comm(now, "hub", "", "", "plan approved · branch "+nonEmpty(p.Branch, "—"))
 	}
+	if p.MergedInto != "" && old.MergedInto == "" {
+		s.comm(now, "hub", "", "", "✓ "+nonEmpty(p.Branch, "branch")+" merged into "+p.MergedInto)
+	}
 	for _, st := range p.Subtasks {
 		was := old.Get(st.ID)
 		if was == nil {

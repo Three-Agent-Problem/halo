@@ -263,5 +263,7 @@ func (d *Demo) run(ctx context.Context) {
 	d.reply(t5, "All checks pass on "+p.Branch+": 48 Go tests, 31 web tests.")
 	set("S5", plan.Done, "", "")
 	d.state(root, "TASK_STATE_WORKING", "Finished mcp__halo__wait_events")
-	d.reply(root, "Run complete: 5/5 merged into "+p.Branch+". 2 review rounds on S2, S4 moved up from haiku to sonnet.")
+	p.MergedInto = "main"
+	publish()
+	d.reply(root, "Run complete: 5/5 merged into "+p.Branch+", then "+p.Branch+" merged into main. 2 review rounds on S2, S4 moved up from haiku to sonnet.")
 }

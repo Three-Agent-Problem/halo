@@ -1,6 +1,6 @@
 # Halo
 
-Type one prompt. A lead agent (Claude Code on Opus) turns it into a plan. Workers on haiku, sonnet and opus build the pieces in their own git worktrees. A reviewer checks them, and the lead merges them into a run branch. You watch it all live in a terminal UI: the plan, each agent's tool calls, and the agents talking to each other.
+Type one prompt. A lead agent (Claude Code on Opus) turns it into a plan. Workers on haiku, sonnet and opus build the pieces in their own git worktrees. A reviewer checks them, and the lead merges them into a run branch, which halo then merges into the branch you started from. You watch it all live in a terminal UI: the plan, each agent's tool calls, and the agents talking to each other.
 
 Every message goes through a [Lagrange](https://github.com/three-agent-problem/lagrange) server as an A2A task, so every run is also a Lagrange run you can replay in its web app.
 
@@ -32,7 +32,7 @@ halo                                          # terminal 2: the TUI; enter, type
 **The agents run Claude Code without asking per tool call.**
 - Workers may do anything inside their worktree, and the reviewer and lead may not edit files.
 - The worktrees live outside your repo, in `~/Library/Caches/halo/<repo>-<hash>/`, so your checkout never changes.
-- The result is a branch, `halo/<run>`, for you to review and merge.
+- When every subtask is merged into `halo/<run>`, halo merges that branch into the branch you started from (needs no uncommitted changes to tracked files; untracked files are fine) and removes the run's worktrees and branches. If that fails (conflict, dirty checkout), the branch is kept and `halo merge <run>` merges it later; `halo merge` lists runs.
 
 A `halo.yaml` next to the repo sets the roster; without one you get one lead, four workers (haiku, two sonnets, opus) and a reviewer:
 
@@ -71,5 +71,6 @@ The lead has only MCP tools to orchestrate with. Each tool call is a Lagrange ta
    - your answers.
 5. **`request_review`:** the reviewer sees the diff. On APPROVE, the subtask is merged into the run branch. On CHANGES, the lead uses **`follow_up`** to send it back to the same worker, in the same Claude session. A subtask gets at most 2 review rounds.
 6. **`escalate`:** moves a failed subtask one model up (haiku → sonnet → opus) and retries it.
+7. **`halo merge`:** once all subtasks are merged, halo merges `halo/<run>` into the branch you started from. If that fails, `halo merge <run>` retries it later; `halo merge` alone lists runs.
 
 Lagrange gaps found along the way are in [FINDINGS.md](FINDINGS.md).
