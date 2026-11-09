@@ -123,13 +123,12 @@ func TestLandNotCheckedOut(t *testing.T) {
 	if gitT(t, repo, "rev-parse", "dev") != gitT(t, repo, "rev-parse", branch) {
 		t.Error("dev not fast-forwarded")
 	}
-	// dev now has diverged from a second run's branch.
+	// A second run's branch and dev2 each have a commit the other lacks.
 	gitT(t, repo, "branch", "dev2", "main")
-	commit(t, repo, "m.txt", "m\n")
-	gitT(t, repo, "branch", "-f", "dev2", "main")
 	branch2 := runWorktree(t, repo, "r2", "other.txt", "o\n")
-	commit(t, repo, "m2.txt", "m2\n")
-	gitT(t, repo, "branch", "-f", "dev2", "main")
+	gitT(t, repo, "checkout", "-q", "dev2")
+	commit(t, repo, "m.txt", "m\n")
+	gitT(t, repo, "checkout", "-q", "main")
 	if _, err := Land(context.Background(), repo, branch2, "dev2"); err == nil {
 		t.Fatal("expected non-ff refusal")
 	}
