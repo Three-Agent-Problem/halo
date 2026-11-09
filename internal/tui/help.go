@@ -20,6 +20,7 @@ var bindings = []binding{
 	{"panels", "enter", "open the selected item"},
 	{"panels", "esc", "back: open item → panel → normal size"},
 	{"run", "i", "write a prompt to the lead"},
+	{"run", "ctrl+v", "while typing: paste the clipboard's image (or drag an image file in); it goes to the agent as a path it reads"},
 	{"run", "/", "a command: /clear starts fresh · /resume reopens a past run · /merge lands the run · /agents · /help"},
 	{"run", "a", "answer what waits on you: y approve · n reject · r reply"},
 	{"run", "a", "when the lead asks multiple-choice questions: a form; ↑↓ choose, enter/space pick, 1-9 quick pick, ←→ questions, Other to write your own, esc later"},

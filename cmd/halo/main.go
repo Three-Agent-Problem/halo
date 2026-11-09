@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"github.com/three-agent-problem/lagrange/client"
@@ -104,7 +105,7 @@ func tuiCmd(ctx context.Context, args []string) error {
 		return tui.Run(ctx, tui.Options{
 			Backend: d, Feed: d.Updates(), Procs: d,
 			State:  tui.NewState(cfg.Prefix, members(cfg, "kaan")),
-			Server: "demo (no server)", Handles: handles, Watching: "the demo has no agents",
+			Server: "demo (no server)", Handles: handles, Watching: "the demo has no agents", ImageDir: imageDir(),
 		})
 	}
 	cfg, st, rosterPath, err := load(*cfgPath)
@@ -130,7 +131,7 @@ func tuiCmd(ctx context.Context, args []string) error {
 	lead := cfg.Handle(cfg.Lead().Name)
 	live := &tui.Live{Server: st.Server, Key: st.Key, Token: func() string { return st.Token(lead) }, Human: st.Human, Lead: lead, Since: *since, Repo: cfg.Repo}
 	o := tui.Options{Preview: previewOf(cfg), Backend: live, State: tui.NewState(cfg.Prefix, members(cfg, st.Human)), Server: st.Server, Handles: handles,
-		Quiet: !cfg.Notifies()}
+		Quiet: !cfg.Notifies(), ImageDir: imageDir()}
 
 	// Host the team here unless another Halo already does (one team, one host).
 	on, err := live.Online(ctx, handles)
@@ -224,4 +225,13 @@ func previewOf(cfg *config.Config) func(short string) (string, string, bool) {
 		cmd, ok := cfg.PreviewCommand(dir)
 		return dir, cmd, ok
 	}
+}
+
+// imageDir is where pasted images are kept: images/ next to Halo's state.
+func imageDir() string {
+	p, err := config.StatePath()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(p), "images")
 }

@@ -158,8 +158,15 @@ func (m *model) typed(k tea.Msg) tea.Cmd {
 	return cmd
 }
 
-// paste inserts pasted text into the input, newlines folded into spaces.
+// paste inserts pasted text into the input, newlines folded into spaces. A
+// pasted (or dragged-in) image file becomes an image chip.
 func (m *model) paste(text string) {
+	if p := imagePath(text); p != "" && m.mode != modeName {
+		if err := m.attach(p); err != nil {
+			m.say("couldn't attach the image: " + err.Error())
+		}
+		return
+	}
 	if t := cleanPaste(text); t != "" {
 		m.input.InsertString(t)
 		m.popSel, m.popOff = 0, false

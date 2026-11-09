@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -34,6 +35,9 @@ type Options struct {
 	// Preview finds the live preview of the run with this short id: the run
 	// worktree and the command that serves it, or ok=false for a non-web project.
 	Preview func(short string) (dir, cmd string, ok bool)
+	// ImageDir is where images pasted into a prompt are kept for the agents to
+	// read; "" uses a folder in the system's temp directory.
+	ImageDir string
 	// Quiet turns off the ping (a desktop notification and a bell) when
 	// something new waits on you.
 	Quiet bool
@@ -91,12 +95,13 @@ type model struct {
 	flash         string
 	flashAt       time.Time
 	cancelArm     time.Time
-	quitAsk       bool            // the quit dialog is open
-	confirm       *confirm        // a y/n question in front of an action
-	blurred       bool            // the terminal reported losing focus
-	focusKnown    bool            // ... so it reports focus at all
-	seenWaits     map[string]bool // waits already pinged about
-	qf            *qform          // the questions being answered (kept across esc)
+	quitAsk       bool              // the quit dialog is open
+	confirm       *confirm          // a y/n question in front of an action
+	blurred       bool              // the terminal reported losing focus
+	focusKnown    bool              // ... so it reports focus at all
+	seenWaits     map[string]bool   // waits already pinged about
+	images        map[string]string // image chip in the input → the copied file
+	qf            *qform            // the questions being answered (kept across esc)
 	deleteArm     string
 	deleteAt      time.Time
 	picker        *picker
@@ -284,6 +289,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.say(msg.what)
 		}
 		return m, m.fetch()
+	case clipMsg:
+		switch {
+		case errors.Is(msg.err, errNoImage):
+			return m, m.typed(msg.key) // no image: a plain text paste
+		case msg.err != nil:
+			m.say("couldn't read the clipboard: " + msg.err.Error())
+		case m.inputText():
+			m.chip(msg.path, "clipboard.png")
+		}
 	case filesMsg:
 		if msg.root == m.st.Root {
 			m.files = msg.files
@@ -332,6 +346,9 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if key == "ctrl+c" {
 		return m.quit()
+	}
+	if key == "ctrl+v" && m.inputText() && m.mode != modeName {
+		return m, m.clipImage(k)
 	}
 	if m.confirm != nil {
 		cf := m.confirm
@@ -424,7 +441,7 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if strings.HasPrefix(text, "/") {
 				return m, m.command(text)
 			}
-			text = ExpandMentions(text, m.shortMap())
+			text = m.expandImages(ExpandMentions(text, m.shortMap()))
 			m.st.Follow, m.st.Hint = true, ""
 			return m, func() tea.Msg {
 				_, err := m.o.Backend.Send(m.ctx, text)
@@ -455,7 +472,7 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			t := m.msg
 			m.clearInput()
 			m.mode = modeNormal
-			text = ExpandMentions(text, m.shortMap())
+			text = m.expandImages(ExpandMentions(text, m.shortMap()))
 			ctx, b, who := m.ctx, m.o.Backend, m.st.Short(t.to) // read here: the cmd runs off the update loop
 			return m, func() tea.Msg {
 				err := b.Message(ctx, t.to, t.sub, text, t.direct)
@@ -497,7 +514,7 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.clearInput()
-			text = ExpandMentions(text, m.shortMap())
+			text = m.expandImages(ExpandMentions(text, m.shortMap()))
 			m.mode = modeNormal
 			m.waits = m.waits[1:]
 			return m, func() tea.Msg {
