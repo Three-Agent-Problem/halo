@@ -18,7 +18,7 @@ import (
 
 func demoState() *State {
 	return NewState("halo", []Member{
-		{Handle: "kaan", Name: "kaan", Model: "human", Role: "human"},
+		{Handle: "ada", Name: "ada", Model: "human", Role: "human"},
 		{Handle: "halo-lead", Name: "lead", Model: "opus", Role: "lead"},
 		{Handle: "halo-haiku-1", Name: "haiku-1", Model: "haiku", Role: "worker"},
 		{Handle: "halo-sonnet-1", Name: "sonnet-1", Model: "sonnet", Role: "worker"},
@@ -32,7 +32,7 @@ func demoState() *State {
 // by the caller's mu.
 func playDemo(t *testing.T, ctx context.Context, mu *sync.Mutex) (*model, *Demo) {
 	t.Helper()
-	d := &Demo{Human: "kaan", Prefix: "halo"}
+	d := &Demo{Human: "ada", Prefix: "halo"}
 	m := newModel(context.Background(), Options{Backend: d, State: demoState(), Server: "localhost:8190", Procs: d})
 	m.connected, m.online = true, 6
 	feed := d.Updates()

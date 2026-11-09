@@ -101,10 +101,10 @@ func tuiCmd(ctx context.Context, args []string) error {
 		for _, a := range cfg.Agents {
 			handles = append(handles, cfg.Handle(a.Name))
 		}
-		d := &tui.Demo{Human: "kaan", Prefix: cfg.Prefix}
+		d := &tui.Demo{Human: "ada", Prefix: cfg.Prefix}
 		return tui.Run(ctx, tui.Options{
 			Backend: d, Feed: d.Updates(), Procs: d,
-			State:  tui.NewState(cfg.Prefix, members(cfg, "kaan")),
+			State:  tui.NewState(cfg.Prefix, members(cfg, "ada")),
 			Server: "demo (no server)", Handles: handles, Watching: "the demo has no agents", ImageDir: imageDir(),
 		})
 	}

@@ -35,7 +35,7 @@ func TestFindToken(t *testing.T) {
 }
 
 var testSrc = Sources{
-	Agents:   []Candidate{{"@kaan", "human"}, {"@lead", "lead"}, {"@sonnet-1", "worker"}, {"@sonnet-2", "worker"}, {"@reviewer", "reviewer"}},
+	Agents:   []Candidate{{"@ada", "human"}, {"@lead", "lead"}, {"@sonnet-1", "worker"}, {"@sonnet-2", "worker"}, {"@reviewer", "reviewer"}},
 	Subtasks: []Candidate{{"#S1", "Plan parser"}, {"#S3", "Prompt autocomplete"}},
 	Files:    []string{"README.md", "internal/tui/app.go", "internal/tui/complete.go", "cmd/halo/main.go", "go.mod"},
 }
@@ -53,7 +53,7 @@ func TestComplete(t *testing.T) {
 		v    string
 		want []string
 	}{
-		{"@", []string{"@kaan", "@lead", "@sonnet-1", "@sonnet-2", "@reviewer"}},
+		{"@", []string{"@ada", "@lead", "@sonnet-1", "@sonnet-2", "@reviewer"}},
 		{"@son", []string{"@sonnet-1", "@sonnet-2"}},
 		{"@view", []string{"@reviewer"}}, // substring after the prefix
 		{"@sonnet-1", nil},               // already complete
@@ -101,7 +101,7 @@ func TestAccept(t *testing.T) {
 }
 
 func TestExpandMentions(t *testing.T) {
-	short := map[string]string{"sonnet-1": "halo-sonnet-1", "lead": "halo-lead", "kaan": "kaan"}
+	short := map[string]string{"sonnet-1": "halo-sonnet-1", "lead": "halo-lead", "ada": "ada"}
 	for in, want := range map[string]string{
 		"ask @sonnet-1 to look":     "ask @halo-sonnet-1 to look",
 		"@lead, see #S3 and a/b.go": "@halo-lead, see #S3 and a/b.go",
@@ -109,7 +109,7 @@ func TestExpandMentions(t *testing.T) {
 		"@nobody stays":             "@nobody stays",
 		"mail me@sonnet-1 stays":    "mail me@sonnet-1 stays",
 		"@sonnet-1 and @sonnet-1.":  "@halo-sonnet-1 and @halo-sonnet-1.",
-		"(@kaan)":                   "(@kaan)",
+		"(@ada)":                    "(@ada)",
 	} {
 		if got := ExpandMentions(in, short); got != want {
 			t.Errorf("%q: %q want %q", in, got, want)

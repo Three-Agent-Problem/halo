@@ -412,7 +412,7 @@ func (d *Demo) run(ctx context.Context) {
 	d.task(q, t3, s2, lead, "Should the routes live under /api/v1 or /api?")
 	d.state(t3, "TASK_STATE_WORKING", "Finished mcp__halo__ask_lead")
 	sleep(ctx, 2500*time.Millisecond)
-	d.reply(q, "/api. Match platform/api.go; kaan asked for it.")
+	d.reply(q, "/api. Match platform/api.go; ada asked for it.")
 	set("S3", plan.Running, "", "")
 	d.work(ctx, t3, []string{"Edit api/tasks.go", "Bash go test ./api/..."}, 3*time.Second)
 	d.commit("halo: S2 pg task store", "store/pg.go", "store/pg_test.go")

@@ -48,7 +48,7 @@ func TestPreviewShell(t *testing.T) {
 
 func previewModel(t *testing.T, hosted bool, ss []Shell) *model {
 	t.Helper()
-	o := Options{Backend: &Demo{Human: "kaan", Prefix: "halo"}, State: demoState(),
+	o := Options{Backend: &Demo{Human: "ada", Prefix: "halo"}, State: demoState(),
 		Preview: func(short string) (string, string, bool) {
 			if short != "abc123" {
 				t.Errorf("short = %q", short)

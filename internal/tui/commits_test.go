@@ -15,7 +15,7 @@ func TestGitCommits(t *testing.T) {
 		t.Skip("no git")
 	}
 	repo := t.TempDir()
-	who := "kaan"
+	who := "ada"
 	git := func(args ...string) {
 		t.Helper()
 		cmd := exec.Command("git", append([]string{"-c", "user.name=" + who, "-c", "user.email=h@x", "-c", "commit.gpgsign=false"}, args...)...)

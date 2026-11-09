@@ -85,7 +85,7 @@ func (d *Demo) startShell(agent, command string, ports ...int) int {
 		d.outs = map[string]string{}
 	}
 	d.outs[out] = ""
-	cwd := "/Users/kaan/Library/Caches/halo/app-3f2a1c/" + strings.TrimPrefix(agent, d.Prefix+"-")
+	cwd := "/Users/ada/Library/Caches/halo/app-3f2a1c/" + strings.TrimPrefix(agent, d.Prefix+"-")
 	d.shells = append(d.shells, Shell{PID: pid, Agent: agent, Command: command, Kind: "shell", Cwd: cwd, Started: time.Now(), Ports: ports, Out: out, Procs: 2 + len(ports)})
 	return pid
 }

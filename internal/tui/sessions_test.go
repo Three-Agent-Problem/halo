@@ -34,8 +34,8 @@ func TestResumeAndClear(t *testing.T) {
 	m.w, m.h = 200, 56
 	old := time.Now().Add(-time.Hour)
 	es := []lg.Entry{
-		{Seq: 1, At: old, Kind: "task", TaskID: "r1", Sender: "kaan", Recipient: "halo-lead", State: stSubmitted, Summary: "first run"},
-		{Seq: 2, At: old, Kind: "task", TaskID: "r2", Sender: "kaan", Recipient: "halo-lead", State: stSubmitted, Summary: "second run"},
+		{Seq: 1, At: old, Kind: "task", TaskID: "r1", Sender: "ada", Recipient: "halo-lead", State: stSubmitted, Summary: "first run"},
+		{Seq: 2, At: old, Kind: "task", TaskID: "r2", Sender: "ada", Recipient: "halo-lead", State: stSubmitted, Summary: "second run"},
 		{Seq: 3, At: old, Kind: "task", TaskID: "t1", ParentTaskID: "r1", Sender: "halo-lead", Recipient: "halo-sonnet-1", State: stSubmitted, Summary: "[S1] build it"},
 		{Seq: 4, At: old, Kind: "task", TaskID: "t2", ParentTaskID: "r2", Sender: "halo-lead", Recipient: "halo-opus-1", State: stSubmitted, Summary: "[S1] other"},
 	}
