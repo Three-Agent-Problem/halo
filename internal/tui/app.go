@@ -40,7 +40,8 @@ const (
 	modePrompt
 	modeAnswer
 	modeNote
-	modeName // naming a new agent
+	modeName    // naming a new agent
+	modeMessage // a message to one agent, via the lead or direct
 )
 
 const promptHint = "describe what to build, then enter"
@@ -61,6 +62,7 @@ type (
 )
 
 type model struct {
+	msg           msgTarget // who modeMessage writes to
 	previewBranch string    // the run branch st.Preview was resolved for
 	previewAt     time.Time // when it was last resolved
 	o             Options
@@ -363,6 +365,37 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, m.typed(k)
+	case modeMessage:
+		if m.popupKey(key) {
+			return m, nil
+		}
+		switch key {
+		case "esc":
+			m.mode = modeNormal
+			m.clearInput()
+			return m, nil
+		case "tab":
+			if m.msg.to != m.st.Lead {
+				m.msg.direct = !m.msg.direct
+				m.input.Placeholder = m.msgHint()
+			}
+			return m, nil
+		case "enter":
+			text := strings.TrimSpace(m.input.Value())
+			if text == "" {
+				return m, nil
+			}
+			t := m.msg
+			m.clearInput()
+			m.mode = modeNormal
+			text = ExpandMentions(text, m.shortMap())
+			ctx, b, who := m.ctx, m.o.Backend, m.st.Short(t.to) // read here: the cmd runs off the update loop
+			return m, func() tea.Msg {
+				err := b.Message(ctx, t.to, t.sub, text, t.direct)
+				return doneMsg{"message sent to " + who, err}
+			}
+		}
+		return m, m.typed(k)
 	case modeAnswer:
 		switch key {
 		case "esc", "q":
@@ -449,6 +482,10 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 		m.mode = modePrompt
 		m.setInput("/")
 		return m, m.startInput(promptHint)
+	case "m":
+		if u.Focus == pPlan || u.Focus == pOrbit || u.Focus == pAgent {
+			return m, m.startMessage()
+		}
 	case "a":
 		if len(m.waits) > 0 {
 			m.mode = modeAnswer
@@ -633,7 +670,7 @@ func (m *model) render(now time.Time) string {
 
 // paneKeys are the footer hints of the focused panel.
 var paneKeys = map[int][][2]string{
-	pPlan: {{"enter", "subtask"}, {"o", "open preview"}, {"p", "start preview"}}, pOrbit: {{"enter", "bigger"}}, pAgent: {{"h/l", "agent"}, {"v", "live/calls"}, {"enter", "open"}},
+	pPlan: {{"enter", "subtask"}, {"o", "open preview"}, {"p", "start preview"}, {"m", "message"}}, pOrbit: {{"enter", "bigger"}, {"m", "message"}}, pAgent: {{"h/l", "agent"}, {"v", "live/calls"}, {"enter", "open"}, {"m", "message"}},
 	pComms: {{"enter", "read"}, {"f", "filter"}}, pCommits: {{"enter", "diff"}}, pEvents: {{"enter", "json"}}, pRoster: {{"enter", "watch"}, {"n", "add"}, {"m", "model"}, {"d", "remove"}},
 	pShells: {{"enter", "output"}, {"o", "open port"}, {"d d", "stop"}},
 }
@@ -659,6 +696,8 @@ func (m *model) footer() string {
 		keys += k("tab", "complete")
 	case len(m.popupCands()) > 0:
 		keys = k("↑↓", "choose") + k("tab/⏎", "accept") + k("esc", "close")
+	case m.mode == modeMessage:
+		keys = k("⏎", "send") + k("tab", "direct/lead") + k("esc", "cancel")
 	case m.mode == modePrompt || m.mode == modeNote || m.mode == modeName:
 		keys = k("⏎", "send") + k("esc", "back")
 	case m.mode == modeAnswer:
