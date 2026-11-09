@@ -22,6 +22,7 @@ var bindings = []binding{
 	{"run", "i", "write a prompt to the lead"},
 	{"run", "/", "a command: /clear starts fresh · /resume reopens a past run · /merge lands the run · /agents · /help"},
 	{"run", "a", "answer what waits on you: y approve · n reject · r reply"},
+	{"run", "a", "when the lead asks multiple-choice questions: a form; ↑↓ choose, enter/space pick, 1-9 quick pick, ←→ questions, Other to write your own, esc later"},
 	{"run", "x x", "cancel the run"},
 	{"run", "q / ctrl+c", "quit, after a y/n dialog (esc never quits)"},
 	{"run", "?", "this help; type to search, esc to close"},

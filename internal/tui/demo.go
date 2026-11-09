@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/three-agent-problem/halo/internal/ask"
 	"github.com/three-agent-problem/halo/internal/lg"
 	"github.com/three-agent-problem/halo/internal/plan"
 )
@@ -299,14 +300,41 @@ func (d *Demo) run(ctx context.Context) {
 	d.raw(lead, root, map[string]any{"sessionUpdate": "plan", "entries": []map[string]string{
 		{"content": "Read the store and platform API", "status": "in_progress"}, {"content": "Publish a plan of 5 subtasks", "status": "pending"},
 		{"content": "Delegate and review each subtask", "status": "pending"}, {"content": "Merge the run branch", "status": "pending"}}})
-	d.work(ctx, root, []string{"Read README.md", "Glob **/*.go", "Read store/store.go", "mcp__halo__publish_plan"}, 3*time.Second)
+	d.work(ctx, root, []string{"Read README.md", "Glob **/*.go", "Read store/store.go"}, 2*time.Second)
+	// Two questions before the plan, answered in the form (or by themselves).
+	qs := []ask.Question{
+		{Header: "Store", Question: "Where should tasks live?", Options: []ask.Option{
+			{Label: "Postgres (Recommended)", Description: "next to the existing tables, with a migration"},
+			{Label: "SQLite", Description: "a file per instance; simpler, no shared state"}}},
+		{Header: "Surfaces", Question: "Which surfaces should create tasks?", MultiSelect: true, Options: []ask.Option{
+			{Label: "API", Description: "POST /api/tasks"}, {Label: "Web form"}, {Label: "CLI"}}},
+	}
+	qtext := "Two questions before I plan:\n\n" + ask.Text(qs)
+	qid := root + "-q"
+	d.task(qid, root, lead, d.Human, qtext)
+	d.state(qid, "TASK_STATE_INPUT_REQUIRED", "Waiting for you to answer.")
+	d.mu.Lock()
+	d.waiting = &Wait{TaskID: qid, Asker: lead, Question: qtext, Since: time.Now(), Questions: qs}
+	d.mu.Unlock()
+	qans := "Store: Postgres (Recommended)\nSurfaces: API, Web form"
+	select {
+	case qans = <-d.answer:
+	case <-time.After(4 * time.Second):
+	case <-ctx.Done():
+		return
+	}
+	d.mu.Lock()
+	d.waiting = nil
+	d.mu.Unlock()
+	d.send(lg.Entry{Kind: "task", TaskID: qid, ParentTaskID: root, Sender: lead, Recipient: d.Human, State: "TASK_STATE_COMPLETED", Summary: qans})
+	d.work(ctx, root, []string{"mcp__halo__publish_plan"}, time.Second)
 	publish()
 	sleep(ctx, time.Second)
-	ask := root + "-ask"
-	d.task(ask, root, lead, d.Human, "Approve this plan? 5 subtasks: S1 schema (haiku), S2 pg store (sonnet), S3 routes (sonnet), S4 web form (haiku), S5 integrate (opus).")
-	d.state(ask, "TASK_STATE_INPUT_REQUIRED", "Waiting for you to answer.")
+	apr := root + "-ask"
+	d.task(apr, root, lead, d.Human, "Approve this plan? 5 subtasks: S1 schema (haiku), S2 pg store (sonnet), S3 routes (sonnet), S4 web form (haiku), S5 integrate (opus).")
+	d.state(apr, "TASK_STATE_INPUT_REQUIRED", "Waiting for you to answer.")
 	d.mu.Lock()
-	d.waiting = &Wait{TaskID: ask, Asker: lead, Question: "Approve this plan? 5 subtasks: S1 schema (haiku), S2 pg store (sonnet), S3 routes (sonnet), S4 web form (haiku), S5 integrate (opus).", Since: time.Now()}
+	d.waiting = &Wait{TaskID: apr, Asker: lead, Question: "Approve this plan? 5 subtasks: S1 schema (haiku), S2 pg store (sonnet), S3 routes (sonnet), S4 web form (haiku), S5 integrate (opus).", Since: time.Now()}
 	d.mu.Unlock()
 	answer := "approve keep the API under /api"
 	select {
@@ -319,11 +347,11 @@ func (d *Demo) run(ctx context.Context) {
 	d.waiting = nil
 	d.mu.Unlock()
 	if strings.HasPrefix(answer, "reject") {
-		d.send(lg.Entry{Kind: "task", TaskID: ask, ParentTaskID: root, Sender: lead, Recipient: d.Human, State: "TASK_STATE_REJECTED", Summary: answer})
+		d.send(lg.Entry{Kind: "task", TaskID: apr, ParentTaskID: root, Sender: lead, Recipient: d.Human, State: "TASK_STATE_REJECTED", Summary: answer})
 		d.state(root, "TASK_STATE_COMPLETED", "")
 		return
 	}
-	d.send(lg.Entry{Kind: "task", TaskID: ask, ParentTaskID: root, Sender: lead, Recipient: d.Human, State: "TASK_STATE_COMPLETED", Summary: strings.TrimPrefix(answer, "approve ")})
+	d.send(lg.Entry{Kind: "task", TaskID: apr, ParentTaskID: root, Sender: lead, Recipient: d.Human, State: "TASK_STATE_COMPLETED", Summary: strings.TrimPrefix(answer, "approve ")})
 	p.Approved, p.Branch = true, "halo/run-"+root[len(root)-4:]
 	publish()
 	d.state(root, "TASK_STATE_WORKING", "Finished mcp__halo__delegate S1")

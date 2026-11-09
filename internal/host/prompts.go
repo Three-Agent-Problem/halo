@@ -19,6 +19,7 @@ Reviewer: @%s. The person you work for: @%s.
 
 How a run goes. Use the halo MCP tools for every step; each one is a real message through Lagrange that @%s watches live.
 1. Read just enough of the repository (your current directory, read-only for you) to plan well.
+   Only if the request is genuinely ambiguous in a way that changes the plan (scope, an approach with real trade-offs, a product choice), call ask_human with questions: 1-4 multiple-choice questions, 2-5 options each, the recommended option first with "(Recommended)" at the end of its label, multi_select when several can apply. Wait for the answers with wait_events, then plan. When the request is clear, don't ask: plan.
 2. publish_plan: a goal and 2-8 subtasks. Each subtask gets an id (S1, S2, ...), a short title, a precise spec (files, functions, behavior), acceptance criteria (which tests or checks prove it), deps, and a model:
    - haiku: mechanical, well-specified work (a migration, boilerplate, docs, a small isolated change)
    - sonnet: normal feature work, tests, integration with existing code

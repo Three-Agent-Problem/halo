@@ -62,7 +62,7 @@ Like lazygit: every panel has a number and `enter` opens the selected item. `+` 
 | `enter` / `esc` | open / back |
 | `i` | prompt the lead |
 | `/` | commands: `/clear` (start fresh), `/resume` (reopen a past run), `/merge` (land the run now), `/agents`, `/help` |
-| `a` | answer what waits on you: `y` approve, `n` reject, `r` reply |
+| `a` | answer what waits on you: `y` approve, `n` reject, `r` reply; the lead's multiple-choice questions open as a form |
 | `x x` | cancel the run |
 | `?` | every key; type to search |
 | `q` | quit |
@@ -71,6 +71,7 @@ Like lazygit: every panel has a number and `enter` opens the selected item. `+` 
 
 The lead has only MCP tools to orchestrate with. Each tool call is a Lagrange task, and Halo enforces the rules in Go:
 
+0. **Questions, only if needed:** when your request is ambiguous in a way that changes the plan, the lead first calls `ask_human` with `questions`: up to 4 multiple-choice questions (pick one, or pick any), like Claude Code's plan mode. `a` opens them as a form; you can always write your own answer instead. Clients that don't know the form (the web inbox, email) get the same questions as text.
 1. **`publish_plan`:** the lead publishes the goal and subtasks (id, spec, acceptance, model, deps). The plan streams to the TUI as the `halo.plan` artifact.
 2. **`ask_human`:** the lead asks you to approve. It shows in the TUI and in your Lagrange inbox, and reaches your phone by email or Slack. No subtask starts before you approve.
 3. **`delegate`:** sends a subtask whose dependencies are merged to the least busy worker of its model, in a fresh worktree of the run branch.

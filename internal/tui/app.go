@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -41,8 +42,9 @@ const (
 	modePrompt
 	modeAnswer
 	modeNote
-	modeName    // naming a new agent
-	modeMessage // a message to one agent, via the lead or direct
+	modeName      // naming a new agent
+	modeMessage   // a message to one agent, via the lead or direct
+	modeQuestions // answering the lead's multiple-choice questions
 )
 
 const promptHint = "describe what to build, then enter"
@@ -85,7 +87,8 @@ type model struct {
 	flash         string
 	flashAt       time.Time
 	cancelArm     time.Time
-	quitAsk       bool // the quit dialog is open
+	quitAsk       bool   // the quit dialog is open
+	qf            *qform // the questions being answered (kept across esc)
 	deleteArm     string
 	deleteAt      time.Time
 	picker        *picker
@@ -228,6 +231,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.waits) == 0 && (m.mode == modeAnswer || m.mode == modeNote) {
 			m.mode = modeNormal
 		}
+		if m.qf != nil && !slices.ContainsFunc(m.waits, func(w Wait) bool { return w.TaskID == m.qf.w.TaskID }) {
+			// Answered elsewhere (the web inbox), or the run ended.
+			m.qf = nil
+			if m.mode == modeQuestions {
+				m.mode = modeNormal
+			}
+		}
 	case onlineMsg:
 		m.online = len(msg)
 		m.st.SetOnline(msg)
@@ -263,7 +273,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.files = msg.files
 		}
 	case tea.PasteMsg:
-		if m.inputText() && m.picker == nil && !m.ui.Help {
+		if m.mode == modeQuestions && m.qf != nil {
+			m.qf.paste(msg.Content)
+		} else if m.inputText() && m.picker == nil && !m.ui.Help {
 			m.paste(msg.Content)
 		}
 	case tea.KeyPressMsg:
@@ -328,6 +340,24 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch m.mode {
+	case modeQuestions:
+		if m.qf == nil {
+			m.mode = modeNormal
+			return m, nil
+		}
+		if key == "esc" {
+			m.mode = modeNormal
+			m.say("answer later with a")
+			return m, nil
+		}
+		if !m.qf.key(k) {
+			return m, nil
+		}
+		w, text := m.qf.w, m.qf.text()
+		m.qf, m.mode = nil, modeNormal
+		m.dropWait(w.TaskID)
+		ctx, b := m.ctx, m.o.Backend
+		return m, func() tea.Msg { return doneMsg{"answers sent", b.Answer(ctx, w.TaskID, text, "")} }
 	case modeName:
 		switch key {
 		case "esc":
@@ -500,7 +530,12 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 			return m, m.startMessage()
 		}
 	case "a":
-		if len(m.waits) > 0 {
+		if len(m.waits) > 0 && len(m.waits[0].Questions) > 0 {
+			if m.qf == nil || m.qf.w.TaskID != m.waits[0].TaskID {
+				m.qf = newQForm(m.waits[0])
+			}
+			m.mode = modeQuestions
+		} else if len(m.waits) > 0 {
 			m.mode = modeAnswer
 		} else {
 			m.say("nothing waits on you")
@@ -599,6 +634,12 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return doneMsg{"run canceled", m.o.Backend.Cancel(m.ctx, root)} }
 	}
 	return m, nil
+}
+
+// dropWait forgets a wait the human just answered, so the header updates
+// before the next poll.
+func (m *model) dropWait(taskID string) {
+	m.waits = slices.DeleteFunc(m.waits, func(w Wait) bool { return w.TaskID == taskID })
 }
 
 // planW is the plan panel's inner width at its current size.
@@ -701,6 +742,9 @@ func (m *model) render(now time.Time) string {
 	if m.picker != nil && m.w >= 80 && m.h >= 24 {
 		sc.Overlay = m.pickerBox(min(m.w-4, 110), min(m.h-4, max(9, len(m.picker.shown())+6)))
 	}
+	if m.mode == modeQuestions && m.qf != nil && m.w >= 80 && m.h >= 24 {
+		sc.Overlay = m.qf.box(m.st, min(m.w-8, 100), m.h-4, m.frame)
+	}
 	if m.quitAsk && m.w >= 80 && m.h >= 24 {
 		sc.Overlay = m.quitBox()
 	}
@@ -737,6 +781,8 @@ func (m *model) footer() string {
 		keys += k("tab", "complete")
 	case len(m.popupCands()) > 0:
 		keys = k("↑↓", "choose") + k("tab/⏎", "accept") + k("esc", "close")
+	case m.mode == modeQuestions:
+		keys = k("↑↓", "choose") + k("⏎/space", "pick") + k("←→", "questions") + k("esc", "later")
 	case m.mode == modeMessage:
 		keys = k("⏎", "send") + k("tab", "direct/lead") + k("esc", "cancel")
 	case m.mode == modePrompt || m.mode == modeNote || m.mode == modeName:

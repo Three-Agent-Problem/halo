@@ -13,6 +13,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/three-agent-problem/halo/internal/ask"
 	"github.com/three-agent-problem/halo/internal/config"
 	"github.com/three-agent-problem/halo/internal/lg"
 	"github.com/three-agent-problem/halo/internal/plan"
@@ -121,8 +122,9 @@ type escalateIn struct {
 }
 
 type askHumanIn struct {
-	Question    string `json:"question" jsonschema:"short and self-contained; for a plan, list the subtasks with their models"`
-	ApprovePlan bool   `json:"approve_plan,omitempty" jsonschema:"true when this asks to approve the published plan"`
+	Question    string         `json:"question" jsonschema:"short and self-contained; for a plan, list the subtasks with their models; with questions, one line of context"`
+	ApprovePlan bool           `json:"approve_plan,omitempty" jsonschema:"true when this asks to approve the published plan"`
+	Questions   []ask.Question `json:"questions,omitempty" jsonschema:"1-4 multiple-choice questions, only when the goal is genuinely ambiguous (never with approve_plan); the human picks options or writes their own answer"`
 }
 
 type waitIn struct {
@@ -166,7 +168,7 @@ func (h *Host) leadMCP() http.Handler {
 				}
 				return r.publishPlan(in)
 			})
-		mcp.AddTool(s, &mcp.Tool{Name: "ask_human", Description: "Ask the person a question in their Lagrange inbox. Returns at once; the answer arrives through wait_events (kind human)."},
+		mcp.AddTool(s, &mcp.Tool{Name: "ask_human", Description: "Ask the person a question in their Lagrange inbox. With questions, it is a multiple-choice form (Halo shows it like Claude Code's plan questions; the answer comes back as one line per question). Returns at once; the answer arrives through wait_events (kind human)."},
 			func(ctx context.Context, _ *mcp.CallToolRequest, in askHumanIn) (*mcp.CallToolResult, out, error) {
 				r, err := open()
 				if err != nil {
@@ -298,7 +300,18 @@ func (r *run) askHuman(ctx context.Context, in askHumanIn) (*mcp.CallToolResult,
 		return nil, out{}, errors.New("publish_plan first")
 	}
 	r.mu.Unlock()
-	res, err := h.caller(r.l.handle).Send(ctx, lg.Call{To: h.st.Human, Parent: r.id, Text: in.Question, Immediate: true})
+	call := lg.Call{To: h.st.Human, Parent: r.id, Text: in.Question, Immediate: true}
+	if len(in.Questions) > 0 {
+		if in.ApprovePlan {
+			return nil, out{}, errors.New("ask questions and the plan approval separately")
+		}
+		if err := ask.Validate(in.Questions); err != nil {
+			return nil, out{}, err
+		}
+		call.Text = strings.TrimSpace(nonEmpty(in.Question, "A few questions before I plan:") + "\n\n" + ask.Text(in.Questions))
+		call.Meta = map[string]any{ask.MetaKey: in.Questions}
+	}
+	res, err := h.caller(r.l.handle).Send(ctx, call)
 	if err != nil {
 		return nil, out{}, err
 	}

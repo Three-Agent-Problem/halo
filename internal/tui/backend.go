@@ -14,15 +14,17 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/three-agent-problem/lagrange/client"
 
+	"github.com/three-agent-problem/halo/internal/ask"
 	"github.com/three-agent-problem/halo/internal/lg"
 )
 
 // Wait is a task waiting on you.
 type Wait struct {
-	TaskID   string
-	Asker    string
-	Question string
-	Since    time.Time
+	TaskID    string
+	Asker     string
+	Question  string
+	Since     time.Time
+	Questions []ask.Question // a multiple-choice form, when the asker sent one
 }
 
 // Backend is where the TUI gets its events and sends what you do.
@@ -123,11 +125,13 @@ func (l *Live) Waiting(ctx context.Context) ([]Wait, error) {
 		if w.Who != l.Human || w.Task == nil {
 			continue
 		}
-		q := w.Task.Summary
+		q, wt := w.Task.Summary, Wait{TaskID: w.Task.ID, Asker: w.Asker, Since: w.Since}
 		if w.Task.Task != nil && len(w.Task.Task.History) > 0 {
 			q = lg.MessageText(w.Task.Task.History[0])
+			wt.Questions = ask.Parse(w.Task.Task.History[0].Metadata)
 		}
-		out = append(out, Wait{TaskID: w.Task.ID, Asker: w.Asker, Question: q, Since: w.Since})
+		wt.Question = q
+		out = append(out, wt)
 	}
 	// The API lists the longest wait first; keep that order.
 	return out, nil
