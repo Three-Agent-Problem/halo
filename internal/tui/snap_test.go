@@ -93,8 +93,18 @@ func TestDemoRenders(t *testing.T) {
 		now := time.Now()
 		m.st.Prune(now)
 		syncDemo(m, d)
+		// Answer the lead's questions at once, as you would, so the run goes on.
+		if ws, _ := d.Waiting(ctx); len(ws) > 0 && len(ws[0].Questions) > 0 {
+			_ = d.Answer(ctx, ws[0].TaskID, "Store: Postgres (Recommended)\nSurfaces: API", "")
+		}
 		m.frame = frames
-		for _, size := range [][2]int{{200, 56}, {160, 44}, {100, 30}} {
+		for i, size := range [][2]int{{200, 56}, {160, 44}, {100, 30}} {
+			if i > 0 {
+				// Let the scripted run go on between sizes (it's slow under -race).
+				mu.Unlock()
+				time.Sleep(10 * time.Millisecond)
+				mu.Lock()
+			}
 			m.w, m.h = size[0], size[1]
 			for id := 1; id <= nPanes; id++ {
 				m.ui.Focus = id
