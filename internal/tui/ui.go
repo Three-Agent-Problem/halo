@@ -91,6 +91,8 @@ type UI struct {
 	Diffs  map[string]string // commit SHA → git show output
 	Calls  bool              // agent: the tool calls Lagrange saw, not the live transcript
 	Out    map[int]string    // shell pid → the end of its output
+	// BoardOff is the stacked plan board's scroll offset.
+	BoardOff int
 }
 
 // NewUI focuses the comms panel.

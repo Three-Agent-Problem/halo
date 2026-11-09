@@ -45,7 +45,7 @@ Like lazygit: every panel has a number and `enter` opens the selected item. `+` 
 
 | Panel | Shows | `enter` opens |
 |---|---|---|
-| `1` plan | subtasks, models, progress; grown: deps, worker, notes | the subtask: status, attempts, its commits and every message about it |
+| `1` plan | subtasks, models, progress and what each running worker does now; grown: a kanban (pending · running · waiting · done, `h`/`l` `j`/`k` move); full: a timeline with a lane per agent and a NOW list | the subtask: status, attempts, its commits and every message about it |
 | `2` orbit | every message travelling through Lagrange | (grows it) |
 | `3` agent | live: the agent's raw Claude Code output (thinking, messages, each tool call with its output); `v` switches to the tool calls Lagrange saw, `h`/`l` switch agents | the whole entry: a tool call's input and full output |
 | `4` comms | agent ⇄ agent messages, wrapped (`f` filters by agent) | the whole message |

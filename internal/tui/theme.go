@@ -80,6 +80,15 @@ func box(w, h int, title, right string, lines []string, hot bool) string {
 	}
 	top := c(bc, "┌─") + " " + title + " "
 	tail := ""
+	// The title wins: the right-hand note gets what's left, cut from its left
+	// end (its tail is usually the count).
+	if room := w - ansi.StringWidth(top) - 6; right != "" && ansi.StringWidth(right) > room {
+		if room < 8 {
+			right = ""
+		} else {
+			right = "…" + ansi.TruncateLeft(right, ansi.StringWidth(right)-room+1, "")
+		}
+	}
 	if right != "" {
 		tail = " " + right + " " + c(bc, "─┐")
 	} else {

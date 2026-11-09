@@ -474,6 +474,9 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 		if cmd, ok := m.previewKey(key); ok {
 			return m, cmd
 		}
+		if z := u.Size[pPlan]; z > sizeNormal && !u.cur().detail && m.st.boardMove(u, key, z < sizeFull && boardWide(m.planW())) {
+			return m, nil
+		}
 	}
 	if u.Focus == pShells && m.o.Procs != nil {
 		if cmd, ok := m.shellKey(key); ok {
@@ -596,6 +599,17 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return doneMsg{"run canceled", m.o.Backend.Cancel(m.ctx, root)} }
 	}
 	return m, nil
+}
+
+// planW is the plan panel's inner width at its current size.
+func (m *model) planW() int {
+	switch {
+	case m.w < minWide || m.ui.Size[pPlan] == sizeFull:
+		return m.w - 4
+	case m.ui.Size[pPlan] == sizeWide:
+		return m.w - rightW - 4
+	}
+	return leftW - 4
 }
 
 // quit opens the "Quit Halo?" dialog: quitting stops the hosted agents and

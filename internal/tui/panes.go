@@ -146,9 +146,32 @@ func (s *State) planPane(w, h int, size Size, focused bool, sc Screen) (string, 
 	if !s.Plan.Approved {
 		foot = []string{"", c("ask", "waiting for your approval · press a")}
 	}
+	if size >= sizeColumn {
+		bh := h - len(head) - len(foot)
+		var body []string
+		if size == sizeFull {
+			body = s.planTimeline(w, bh, sc)
+		} else {
+			body = s.planBoard(w, bh, focused, sc)
+		}
+		for len(body) < bh {
+			body = append(body, "")
+		}
+		if focused && (size == sizeFull || boardWide(w)) {
+			right = c("dim", pick(size == sizeFull, "j/k subtask · enter open · ", "h/l j/k move · enter open · ")) + right
+		}
+		return title, right, append(append(head, body...), foot...)
+	}
 	items := make([][]string, len(s.Plan.Subtasks))
+	// Spare rows show what the running subtasks are doing.
+	spare := h - len(head) - len(foot) - len(s.Plan.Subtasks)
 	for i, st := range s.Plan.Subtasks {
 		items[i] = []string{s.subLine(st, w-2, sc)}
+		if live := st.Status == plan.Running || st.Status == plan.Changes || st.Status == plan.Asking; live && spare > 0 {
+			now, nk := s.subNow(st)
+			items[i] = append(items[i], "      "+c(nk, fit(now, w-8)))
+			spare--
+		}
 		if size > sizeNormal {
 			var bits []string
 			if len(st.Deps) > 0 {

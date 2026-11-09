@@ -293,6 +293,11 @@ func (s *State) planHeight() int {
 		return 6
 	}
 	n := len(s.Plan.Subtasks) + 2 + min(2, len(wrapLines(s.Plan.Goal, leftW-6, 0))) + 1
+	for _, st := range s.Plan.Subtasks {
+		if st.Status == plan.Running || st.Status == plan.Changes || st.Status == plan.Asking {
+			n++ // the live line under it
+		}
+	}
 	if !s.Plan.Approved {
 		n += 2
 	}

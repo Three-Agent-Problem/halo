@@ -29,6 +29,8 @@ var bindings = []binding{
 	{"2 orbit", "m", "message the selected agent (via the lead, tab: direct)"},
 	{"3 agent", "m", "message this agent and its current subtask (via the lead, tab: direct)"},
 	{"1 plan", "enter", "subtask detail: status, worker, commits, every message about it"},
+	{"1 plan", "+", "a kanban (pending · running · waiting · done) with what each worker does now; h/l j/k move between cards"},
+	{"1 plan", "+ + +", "full size: a timeline, one lane per agent: who worked on what, when, who waited, and what everyone does now"},
 	{"3 agent", "h / l", "previous / next agent"},
 	{"3 agent", "v", "live output (thinking, messages, every tool call with its output) ⇄ the tool calls Lagrange saw"},
 	{"3 agent", "enter", "live: the whole entry, a tool call's input and full output · calls: the latest task and its answer"},
