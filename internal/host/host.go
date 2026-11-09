@@ -99,13 +99,13 @@ type Host struct {
 // Event is something the running roster reports: an agent connected, where the
 // logs are, an error.
 type Event struct {
-	Kind  string          // "start", "online", "error", "acp"
-	Agent string          // the handle, for "online" and "acp"
-	Text  string          // for "acp", the session update type
-	Task  string          // for "acp", the A2A task the agent works on
+	Kind  string // "start", "online", "error", "acp"
+	Agent string // the handle, for "online" and "acp"
+	Text  string // for "acp", the session update type
+	Task  string // for "acp", the A2A task the agent works on
 	// Context is the A2A context of Task: one ACP session per context.
 	Context string
-	Data  json.RawMessage // for "acp", the session update as the agent sent it
+	Data    json.RawMessage // for "acp", the session update as the agent sent it
 }
 
 // Print is a notify func for a terminal: one line per event.
