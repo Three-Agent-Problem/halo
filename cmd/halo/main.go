@@ -3,6 +3,7 @@
 //
 //	halo init --server URL --key KEY   save the server and an API key, create the addresses
 //	halo agents                        run the roster (lead, workers, reviewer) on this machine
+//	halo merge [run] [--keep]          list finished runs, or merge one into the current branch
 //	halo                               the TUI
 //	halo --demo                        the TUI playing a scripted run, no server needed
 package main
@@ -39,10 +40,14 @@ func run(ctx context.Context, args []string) error {
 			return initCmd(ctx, args[1:])
 		case "agents":
 			return agentsCmd(ctx, args[1:])
+		case "merge":
+			return mergeCmd(ctx, args[1:])
 		case "help", "-h", "--help":
 			fmt.Println(`usage:
   halo init --server URL --key lgk_...   save the Lagrange server and an API key, create the addresses
   halo agents [-config halo.yaml]         run the roster on this machine (keep it running)
+  halo merge                              list finished runs (halo/<run> branches)
+  halo merge <run> [--keep]               merge a run into the checked-out branch, then clean it up
   halo [-config halo.yaml] [-since N]     the TUI
   halo --demo                             the TUI playing a scripted run, no server needed`)
 			return nil
