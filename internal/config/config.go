@@ -37,9 +37,15 @@ type Config struct {
 	// e.g. "npm run dev". Setting it marks the project as a web project; without
 	// it Halo detects one from package.json (see [Config.PreviewCommand]).
 	Preview string `yaml:"preview"`
+	// Notify, when false, keeps Halo from pinging the terminal (a desktop
+	// notification and a bell) when something new waits on you. On by default.
+	Notify *bool `yaml:"notify,omitempty"`
 	// Agents is the roster: one lead, one reviewer, any number of workers.
 	Agents []Agent `yaml:"agents"`
 }
+
+// Notifies reports whether Halo pings when something waits on you.
+func (c *Config) Notifies() bool { return c.Notify == nil || *c.Notify }
 
 // Agent is one roster entry.
 type Agent struct {

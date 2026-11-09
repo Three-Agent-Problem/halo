@@ -64,6 +64,7 @@ Like lazygit: every panel has a number and `enter` opens the selected item. `+` 
 | `/` | commands: `/clear` (start fresh), `/resume` (reopen a past run), `/merge` (land the run now), `/agents`, `/help` |
 | `a` | answer what waits on you: `y` approve, `n` reject, `r` reply; the lead's multiple-choice questions open as a form |
 | `x` | in the plan or agent panel: stop that running subtask's worker (asks y/n; the lead then asks you what next); elsewhere `x` `x` cancels the run |
+| (ping) | when something new waits on you and the terminal isn't focused, Halo sends a desktop notification (OSC 9: iTerm2, Ghostty, WezTerm, kitty) and a bell; `notify: false` in `halo.yaml` turns it off |
 | `?` | every key; type to search |
 | `q` | quit |
 

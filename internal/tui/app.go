@@ -34,6 +34,9 @@ type Options struct {
 	// Preview finds the live preview of the run with this short id: the run
 	// worktree and the command that serves it, or ok=false for a non-web project.
 	Preview func(short string) (dir, cmd string, ok bool)
+	// Quiet turns off the ping (a desktop notification and a bell) when
+	// something new waits on you.
+	Quiet bool
 }
 
 type mode int
@@ -88,9 +91,12 @@ type model struct {
 	flash         string
 	flashAt       time.Time
 	cancelArm     time.Time
-	quitAsk       bool     // the quit dialog is open
-	confirm       *confirm // a y/n question in front of an action
-	qf            *qform   // the questions being answered (kept across esc)
+	quitAsk       bool            // the quit dialog is open
+	confirm       *confirm        // a y/n question in front of an action
+	blurred       bool            // the terminal reported losing focus
+	focusKnown    bool            // ... so it reports focus at all
+	seenWaits     map[string]bool // waits already pinged about
+	qf            *qform          // the questions being answered (kept across esc)
 	deleteArm     string
 	deleteAt      time.Time
 	picker        *picker
@@ -228,7 +234,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case connMsg:
 		m.connected = msg.ok
+	case tea.FocusMsg:
+		m.blurred, m.focusKnown = false, true
+	case tea.BlurMsg:
+		m.blurred, m.focusKnown = true, true
 	case waitsMsg:
+		ping := m.newWaits(msg)
 		m.waits = msg
 		if len(m.waits) == 0 && (m.mode == modeAnswer || m.mode == modeNote) {
 			m.mode = modeNormal
@@ -239,6 +250,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.mode == modeQuestions {
 				m.mode = modeNormal
 			}
+		}
+		if ping != nil && !m.o.Quiet && (m.blurred || !m.focusKnown) {
+			return m, tea.Raw(notifySeq(fmt.Sprintf("%s asks you: %s", m.st.Short(ping.Asker), firstLine(ping.Question))))
 		}
 	case onlineMsg:
 		m.online = len(msg)
@@ -697,6 +711,40 @@ func (m *model) stoppable() *plan.Subtask {
 	return st
 }
 
+// newWaits returns the first wait in ws Halo hasn't seen before, and remembers
+// them all. The first list after start is only remembered: you're looking.
+func (m *model) newWaits(ws []Wait) *Wait {
+	first := m.seenWaits == nil
+	if first {
+		m.seenWaits = map[string]bool{}
+	}
+	var fresh *Wait
+	for i := range ws {
+		if !m.seenWaits[ws[i].TaskID] {
+			m.seenWaits[ws[i].TaskID] = true
+			if fresh == nil && !first {
+				fresh = &ws[i]
+			}
+		}
+	}
+	return fresh
+}
+
+// notifySeq is a desktop notification (OSC 9: iTerm2, Ghostty, WezTerm, kitty,
+// Windows Terminal) followed by a bell for the terminals without it.
+func notifySeq(text string) string {
+	text = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f || r == 0x9c {
+			return ' '
+		}
+		return r
+	}, "halo: "+text)
+	if r := []rune(text); len(r) > 120 {
+		text = string(r[:119]) + "…"
+	}
+	return "\x1b]9;" + text + "\x07\a"
+}
+
 // dropWait forgets a wait the human just answered, so the header updates
 // before the next poll.
 func (m *model) dropWait(taskID string) {
@@ -778,6 +826,7 @@ func (m *model) View() tea.View {
 	}
 	v := tea.NewView(m.render(time.Now()))
 	v.AltScreen = true
+	v.ReportFocus = true // to ping only when you're looking elsewhere
 	v.WindowTitle = "halo"
 	return v
 }

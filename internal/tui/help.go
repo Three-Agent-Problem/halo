@@ -28,6 +28,7 @@ var bindings = []binding{
 	{"3 agent", "x", "stop this agent's current subtask (y/n first)"},
 	{"run", "q / ctrl+c", "quit, after a y/n dialog (esc never quits)"},
 	{"run", "?", "this help; type to search, esc to close"},
+	{"run", "(ping)", "a desktop notification and a bell when something new waits on you while the terminal isn't focused; notify: false in halo.yaml turns it off"},
 	{"1 plan", "m", "message the selected subtask's worker (via the lead, tab: direct)"},
 	{"2 orbit", "m", "message the selected agent (via the lead, tab: direct)"},
 	{"3 agent", "m", "message this agent and its current subtask (via the lead, tab: direct)"},
