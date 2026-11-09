@@ -711,16 +711,7 @@ func (m *model) shellKey(key string) (tea.Cmd, bool) {
 	sh := m.st.Shells[c.sel]
 	switch key {
 	case "o":
-		if len(sh.Ports) == 0 {
-			m.say("that shell doesn't listen on a port")
-			return nil, true
-		}
-		url := fmt.Sprintf("http://localhost:%d", sh.Ports[0])
-		if err := openURL(url); err != nil {
-			m.say("can't open " + url + ": " + err.Error())
-		} else {
-			m.say("opened " + url)
-		}
+		m.openPort(sh)
 		return nil, true
 	case "d":
 		arm := fmt.Sprint(sh.PID)
@@ -738,6 +729,20 @@ func (m *model) shellKey(key string) (tea.Cmd, bool) {
 		}, true
 	}
 	return nil, false
+}
+
+// openPort opens the first port of a shell in the browser.
+func (m *model) openPort(sh Shell) {
+	if len(sh.Ports) == 0 {
+		m.say("that shell doesn't listen on a port")
+		return
+	}
+	url := portURL(sh.Ports[0])
+	if err := openURL(url); err != nil {
+		m.say("can't open " + url + ": " + err.Error())
+	} else {
+		m.say("opened " + url)
+	}
 }
 
 // openURL opens url in the browser.

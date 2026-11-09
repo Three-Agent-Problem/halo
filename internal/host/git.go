@@ -55,6 +55,18 @@ func cacheRoot(repo string) (string, error) {
 	return filepath.Join(cache, "halo", filepath.Base(repo)+"-"+hex.EncodeToString(sum[:4])), nil
 }
 
+// RunDir is the worktree of the run branch for a run's short id, the directory
+// runBranch creates, so that the TUI can find where the run's code lives.
+func RunDir(repo, short string) (string, error) {
+	root, err := cacheRoot(repo)
+	if err != nil {
+		return "", err
+	}
+	return runDirIn(root, short), nil
+}
+
+func runDirIn(root, short string) string { return filepath.Join(root, short, "_run") }
+
 // base returns the branch checked out in the repository, which is what a run's
 // branch gets merged into. It fails on a detached HEAD.
 func (w *worktrees) base(ctx context.Context) (string, error) {
@@ -68,7 +80,7 @@ func (w *worktrees) base(ctx context.Context) (string, error) {
 // runBranch creates the run's integration branch at HEAD and its worktree.
 func (w *worktrees) runBranch(ctx context.Context, short string) (branch, dir string, err error) {
 	branch = "halo/" + short
-	dir = filepath.Join(w.root, short, "_run")
+	dir = runDirIn(w.root, short)
 	if _, err := os.Stat(dir); err == nil {
 		return branch, dir, nil
 	}

@@ -27,8 +27,9 @@ type Screen struct {
 	Connected bool
 	Online    int
 	Waiting   int
-	Footer    string // the prompt line, already rendered
-	Bottom    string // replaces the bottom of the screen when set (answering)
+	Footer    string   // the prompt line(s), already rendered
+	Popup     []string // the completion list, drawn above the input
+	Bottom    string   // replaces the bottom of the screen when set (answering)
 	BottomTag string
 	Flash     string
 	UI        *UI
@@ -46,7 +47,8 @@ func (s *State) Render(sc Screen) string {
 		sc.UI = NewUI()
 	}
 	u := sc.UI
-	bodyH := sc.H - 2
+	foot := strings.Split(sc.Footer, "\n")
+	bodyH := sc.H - 1 - len(foot)
 	var body []string
 	switch size := u.Size[u.Focus]; {
 	case size == sizeNormal:
@@ -72,6 +74,9 @@ func (s *State) Render(sc Screen) string {
 		ab := strings.Split(box(sc.W, commsH, c("ask!", "ANSWER")+c("dim", " · "+sc.BottomTag), "", strings.Split(sc.Bottom, "\n"), true), "\n")
 		body = append(body[:len(body)-commsH], ab...)
 	}
+	if len(sc.Popup) > 0 {
+		body = overlay(body, sc.Popup, 1, bodyH-len(sc.Popup), sc.W)
+	}
 	if len(sc.Overlay) > 0 {
 		w := ansi.StringWidth(sc.Overlay[0])
 		body = overlay(body, sc.Overlay, (sc.W-w)/2, max(0, (bodyH-len(sc.Overlay))/2), sc.W)
@@ -80,7 +85,10 @@ func (s *State) Render(sc Screen) string {
 		w, h := min(sc.W-4, 96), min(bodyH-2, 40)
 		body = overlay(body, helpBox(u.Query, w, h, sc.Frame), (sc.W-w)/2, (bodyH-h)/2, sc.W)
 	}
-	return strings.Join(append(append([]string{s.header(sc)}, body...), fit(sc.Footer, sc.W)), "\n")
+	for i := range foot {
+		foot[i] = fit(foot[i], sc.W)
+	}
+	return strings.Join(append(append([]string{s.header(sc)}, body...), foot...), "\n")
 }
 
 // normal is the default layout: plan and commits on the left, the orbit in the

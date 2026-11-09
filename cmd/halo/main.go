@@ -127,8 +127,9 @@ func tuiCmd(ctx context.Context, args []string) error {
 	for _, a := range cfg.Agents {
 		handles = append(handles, cfg.Handle(a.Name))
 	}
-	live := &tui.Live{Server: st.Server, Key: st.Key, Human: st.Human, Lead: cfg.Handle(cfg.Lead().Name), Since: *since, Repo: cfg.Repo}
-	o := tui.Options{Backend: live, State: tui.NewState(cfg.Prefix, members(cfg, st.Human)), Server: st.Server, Handles: handles}
+	lead := cfg.Handle(cfg.Lead().Name)
+	live := &tui.Live{Server: st.Server, Key: st.Key, Token: func() string { return st.Token(lead) }, Human: st.Human, Lead: lead, Since: *since, Repo: cfg.Repo}
+	o := tui.Options{Preview: previewOf(cfg), Backend: live, State: tui.NewState(cfg.Prefix, members(cfg, st.Human)), Server: st.Server, Handles: handles}
 
 	// Host the team here unless another Halo already does (one team, one host).
 	on, err := live.Online(ctx, handles)
@@ -210,4 +211,16 @@ func agentsCmd(ctx context.Context, args []string) error {
 		return errors.New("run halo agents inside a git repository: the agents work on it")
 	}
 	return host.Run(ctx, cfg, st, nil)
+}
+
+// previewOf finds a run's live preview: its worktree and the command that serves it.
+func previewOf(cfg *config.Config) func(short string) (string, string, bool) {
+	return func(short string) (string, string, bool) {
+		dir, err := host.RunDir(cfg.Repo, short)
+		if err != nil {
+			return "", "", false
+		}
+		cmd, ok := cfg.PreviewCommand(dir)
+		return dir, cmd, ok
+	}
 }

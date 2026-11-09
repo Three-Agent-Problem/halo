@@ -31,6 +31,7 @@ type Demo struct {
 	shells  []Shell
 	outs    map[string]string
 	pid     int
+	msgs    int // fake human messages sent
 }
 
 type demoTask struct{ parent, from, to string }
@@ -89,6 +90,33 @@ func (d *Demo) History(context.Context) ([]lg.Entry, error) { return nil, nil }
 
 // Continue implements Backend.
 func (d *Demo) Continue(string) {}
+
+// Message implements Backend: the demo has no agents to reach, so it shows the
+// message as a fake human_message task to the lead that completes at once.
+func (d *Demo) Message(_ context.Context, to, subtask, text string, direct bool) error {
+	if strings.TrimSpace(text) == "" {
+		return fmt.Errorf("the message is empty")
+	}
+	d.mu.Lock()
+	ready := d.emit != nil
+	d.msgs++
+	id := fmt.Sprintf("demo-msg-%d", d.msgs)
+	d.mu.Unlock()
+	if !ready {
+		return nil
+	}
+	to = strings.TrimPrefix(to, "@")
+	if to == "" {
+		to = d.h("lead")
+	}
+	how := "via the lead"
+	if direct {
+		how = "direct"
+	}
+	d.task(id, "", d.Human, d.h("lead"), strings.TrimSpace(fmt.Sprintf("message to @%s %s (%s): %s", to, subtask, how, text)))
+	d.state(id, "TASK_STATE_COMPLETED", "Sent.")
+	return nil
+}
 
 // Commits implements Backend: the commits the scripted run made.
 func (d *Demo) Commits(context.Context, string, time.Time) ([]Commit, error) {
