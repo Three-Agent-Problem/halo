@@ -353,3 +353,30 @@ func toHTML(s string) string {
 	b.WriteString("</pre>")
 	return b.String()
 }
+
+func TestQuitAsks(t *testing.T) {
+	m := newModel(context.Background(), Options{Backend: &Demo{}, State: demoState()})
+	m.w, m.h = 200, 56
+	for _, k := range []tea.KeyPressMsg{{Code: 'q', Text: "q"}, {Code: 'c', Mod: tea.ModCtrl}} {
+		if _, cmd := m.key(k); cmd != nil || !m.quitAsk {
+			t.Fatalf("%s should open the dialog, not quit", k)
+		}
+		if out := stripANSI(m.render(time.Now())); !strings.Contains(out, "Quit Halo?") {
+			t.Fatalf("no dialog:\n%s", out)
+		}
+		m.key(tea.KeyPressMsg{Code: tea.KeyEscape})
+		if m.quitAsk {
+			t.Fatal("esc keeps Halo open")
+		}
+	}
+	m.key(tea.KeyPressMsg{Code: tea.KeyEscape})
+	if m.quitAsk {
+		t.Fatal("esc alone never opens the dialog")
+	}
+	m.key(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	if _, cmd := m.key(tea.KeyPressMsg{Code: 'y', Text: "y"}); cmd == nil {
+		t.Fatal("y quits")
+	} else if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Fatal("y should return tea.Quit")
+	}
+}

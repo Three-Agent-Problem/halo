@@ -22,7 +22,7 @@ var bindings = []binding{
 	{"run", "/", "a command: /clear starts fresh · /resume reopens a past run · /merge lands the run · /agents · /help"},
 	{"run", "a", "answer what waits on you: y approve · n reject · r reply"},
 	{"run", "x x", "cancel the run"},
-	{"run", "q / ctrl+c", "quit"},
+	{"run", "q / ctrl+c", "quit, after a y/n dialog (esc never quits)"},
 	{"run", "?", "this help; type to search, esc to close"},
 	{"1 plan", "m", "message the selected subtask's worker (via the lead, tab: direct)"},
 	{"2 orbit", "m", "message the selected agent (via the lead, tab: direct)"},

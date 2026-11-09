@@ -8,6 +8,7 @@ import (
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/three-agent-problem/halo/internal/lg"
 )
@@ -84,7 +85,7 @@ type model struct {
 	flash         string
 	flashAt       time.Time
 	cancelArm     time.Time
-	quitArm       time.Time
+	quitAsk       bool // the quit dialog is open
 	deleteArm     string
 	deleteAt      time.Time
 	picker        *picker
@@ -292,6 +293,15 @@ func (m *model) wantDiff() tea.Cmd {
 
 func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	key := k.String()
+	if m.quitAsk {
+		switch key {
+		case "y", "Y", "enter", "ctrl+c":
+			return m, tea.Quit
+		case "n", "N", "esc", "q":
+			m.quitAsk = false
+		}
+		return m, nil
+	}
 	if key == "ctrl+c" {
 		return m.quit()
 	}
@@ -588,14 +598,25 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// quit quits, after a second press when this Halo's agents are working on a run.
+// quit opens the "Quit Halo?" dialog: quitting stops the hosted agents and
+// leaves the run, so it is never one stray key.
 func (m *model) quit() (tea.Model, tea.Cmd) {
-	if m.o.Team != nil && m.running() && time.Since(m.quitArm) > 3*time.Second {
-		m.quitArm = time.Now()
-		m.say("a run is in flight: press q again to stop the agents and quit")
-		return m, nil
+	m.quitAsk = true
+	return m, nil
+}
+
+// quitBox is the quit dialog.
+func (m *model) quitBox() []string {
+	what := "The run stays in Lagrange; /resume picks it up."
+	if m.o.Team != nil && m.running() {
+		what = "A run is in flight: the agents hosted here stop."
+	} else if m.o.Team != nil {
+		what = "The agents hosted here stop."
 	}
-	return m, tea.Quit
+	lines := []string{"", "  " + c("hi!", "Quit Halo?"), "  " + c("mute", what), "",
+		"  " + c("fail!", "y") + c("mute", " quit   ") + c("reply!", "n") + c("mute", " stay"), ""}
+	w := 4 + ansi.StringWidth(what) + 4
+	return strings.Split(box(max(w, 40), len(lines)+2, c("ask!", "QUIT"), "", lines, true), "\n")
 }
 
 // open opens the selected item of the focused panel.
@@ -665,6 +686,9 @@ func (m *model) render(now time.Time) string {
 	if m.picker != nil && m.w >= 80 && m.h >= 24 {
 		sc.Overlay = m.pickerBox(min(m.w-4, 110), min(m.h-4, max(9, len(m.picker.shown())+6)))
 	}
+	if m.quitAsk && m.w >= 80 && m.h >= 24 {
+		sc.Overlay = m.quitBox()
+	}
 	return m.st.Render(sc)
 }
 
@@ -685,6 +709,8 @@ func (m *model) footer() string {
 	k := func(key, what string) string { return c("mute!", key) + c("dim", " "+what+"  ") }
 	var keys string
 	switch {
+	case m.quitAsk:
+		keys = k("y/⏎", "quit") + k("n/esc", "stay")
 	case m.picker != nil:
 		keys = k("↑↓", "choose") + k("enter", "resume") + k("type", "filter") + k("esc", "close")
 	case m.ui.Help:
