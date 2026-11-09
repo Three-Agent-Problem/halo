@@ -141,6 +141,9 @@ func (s *State) planPane(w, h int, size Size, focused bool, sc Screen) (string, 
 	for _, l := range wrapLines(s.Plan.Goal, w-2, goalN) {
 		head = append(head, c("line2", "│ ")+c("mute", l))
 	}
+	if s.Preview.Web() {
+		head = append(head, c("line2", "│ ")+s.previewRow(sc))
+	}
 	head = append(head, "")
 	var foot []string
 	if !s.Plan.Approved {
@@ -175,6 +178,19 @@ func (s *State) planPane(w, h int, size Size, focused bool, sc Screen) (string, 
 		list = append(list, "")
 	}
 	return title, right, append(append(head, list...), foot...)
+}
+
+// previewRow is the live preview line under the goal: the dev server's URL, or
+// how to start it.
+func (s *State) previewRow(sc Screen) string {
+	label := c("dim", "preview  ")
+	if sh, ok := previewShell(s.Shells, s.Preview.Dir); ok {
+		return label + c("hi!", portURL(sh.Ports[0])) + c("dim", "  o open")
+	}
+	if sc.Procs {
+		return label + c("mute", "not running — p to start")
+	}
+	return label + c("mute", "not running")
 }
 
 func (s *State) subLine(st *plan.Subtask, w int, sc Screen) string {

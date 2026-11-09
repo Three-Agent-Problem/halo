@@ -28,6 +28,9 @@ type Options struct {
 	// nil when this Halo only watches.
 	Feed  <-chan Update
 	Procs Procs
+	// Preview finds the live preview of the run with this short id: the run
+	// worktree and the command that serves it, or ok=false for a non-web project.
+	Preview func(short string) (dir, cmd string, ok bool)
 }
 
 type mode int
@@ -59,31 +62,33 @@ type (
 )
 
 type model struct {
-	msg         msgTarget // who modeMessage writes to
-	o           Options
-	st          *State
-	ui          *UI
-	w, h        int
-	frame       int
-	connected   bool
-	online      int
-	waits       []Wait
-	mode        mode
-	input       textarea.Model
-	popSel      int  // the highlighted completion
-	popOff      bool // esc closed the completion list
-	files       []string
-	filesFor    string // the run the file list was read for
-	filesLoaded bool
-	decision    string
-	flash       string
-	flashAt     time.Time
-	cancelArm   time.Time
-	quitArm     time.Time
-	deleteArm   string
-	deleteAt    time.Time
-	picker      *picker
-	ctx         context.Context
+	msg           msgTarget // who modeMessage writes to
+	previewBranch string    // the run branch st.Preview was resolved for
+	previewAt     time.Time // when it was last resolved
+	o             Options
+	st            *State
+	ui            *UI
+	w, h          int
+	frame         int
+	connected     bool
+	online        int
+	waits         []Wait
+	mode          mode
+	input         textarea.Model
+	popSel        int  // the highlighted completion
+	popOff        bool // esc closed the completion list
+	files         []string
+	filesFor      string // the run the file list was read for
+	filesLoaded   bool
+	decision      string
+	flash         string
+	flashAt       time.Time
+	cancelArm     time.Time
+	quitArm       time.Time
+	deleteArm     string
+	deleteAt      time.Time
+	picker        *picker
+	ctx           context.Context
 }
 
 func newModel(ctx context.Context, o Options) *model {
@@ -384,9 +389,10 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.clearInput()
 			m.mode = modeNormal
 			text = ExpandMentions(text, m.shortMap())
+			ctx, b, who := m.ctx, m.o.Backend, m.st.Short(t.to) // read here: the cmd runs off the update loop
 			return m, func() tea.Msg {
-				err := m.o.Backend.Message(m.ctx, t.to, t.sub, text, t.direct)
-				return doneMsg{"message sent to " + m.st.Short(t.to), err}
+				err := b.Message(ctx, t.to, t.sub, text, t.direct)
+				return doneMsg{"message sent to " + who, err}
 			}
 		}
 		return m, m.typed(k)
@@ -451,6 +457,11 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 	}
 	if u.Focus == pRoster && !u.cur().detail {
 		if cmd, ok := m.rosterKey(key); ok {
+			return m, cmd
+		}
+	}
+	if u.Focus == pPlan {
+		if cmd, ok := m.previewKey(key); ok {
 			return m, cmd
 		}
 	}
@@ -634,6 +645,13 @@ func (m *model) View() tea.View {
 }
 
 func (m *model) render(now time.Time) string {
+	if pl := m.st.Plan; pl != nil && (pl.Branch != m.previewBranch ||
+		(!m.st.Preview.Web() && now.Sub(m.previewAt) >= previewRecheck)) {
+		// A run that isn't a web project yet may create package.json or index.html
+		// in its worktree later, so look again every few seconds.
+		m.previewBranch, m.previewAt = pl.Branch, now
+		m.st.Preview = m.previewFor(pl.Branch)
+	}
 	sc := Screen{W: m.w, H: m.h, Frame: m.frame, Now: now, Server: m.o.Server, Connected: m.connected,
 		Online: m.online, Waiting: len(m.waits), Flash: m.flash, UI: m.ui, Team: "team here", Procs: m.o.Procs != nil}
 	if m.o.Team == nil {
@@ -652,7 +670,7 @@ func (m *model) render(now time.Time) string {
 
 // paneKeys are the footer hints of the focused panel.
 var paneKeys = map[int][][2]string{
-	pPlan: {{"enter", "subtask"}, {"m", "message"}}, pOrbit: {{"enter", "bigger"}, {"m", "message"}}, pAgent: {{"h/l", "agent"}, {"v", "live/calls"}, {"enter", "open"}, {"m", "message"}},
+	pPlan: {{"enter", "subtask"}, {"o", "open preview"}, {"p", "start preview"}, {"m", "message"}}, pOrbit: {{"enter", "bigger"}, {"m", "message"}}, pAgent: {{"h/l", "agent"}, {"v", "live/calls"}, {"enter", "open"}, {"m", "message"}},
 	pComms: {{"enter", "read"}, {"f", "filter"}}, pCommits: {{"enter", "diff"}}, pEvents: {{"enter", "json"}}, pRoster: {{"enter", "watch"}, {"n", "add"}, {"m", "model"}, {"d", "remove"}},
 	pShells: {{"enter", "output"}, {"o", "open port"}, {"d d", "stop"}},
 }

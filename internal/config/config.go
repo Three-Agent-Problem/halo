@@ -33,6 +33,10 @@ type Config struct {
 	Repo string `yaml:"repo"`
 	// ACP is the coding agent command, "claude-agent-acp" by default.
 	ACP string `yaml:"acp"`
+	// Preview is the command that serves the project for the live preview row,
+	// e.g. "npm run dev". Setting it marks the project as a web project; without
+	// it Halo detects one from package.json (see [Config.PreviewCommand]).
+	Preview string `yaml:"preview"`
 	// Agents is the roster: one lead, one reviewer, any number of workers.
 	Agents []Agent `yaml:"agents"`
 }

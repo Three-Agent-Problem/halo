@@ -97,3 +97,24 @@ func TestMessageEscAndTargets(t *testing.T) {
 		t.Fatalf("want a status error, mode %v flash %q", m.mode, m.flash)
 	}
 }
+
+func TestMessageTabPopup(t *testing.T) {
+	m, _ := newMsgModel()
+	m.ui.Focus, m.st.Focus = pAgent, "halo-sonnet-1"
+	m.key(keyPress("m"))
+	typeText(m, "ask @haiku")
+	if _, cs := m.popup(); len(cs) == 0 {
+		t.Fatal("popup should be open")
+	}
+	m.key(keyPress("tab"))
+	if m.msg.direct || !strings.Contains(m.input.Value(), "@haiku-1") {
+		t.Fatalf("tab with the popup open accepts it: direct=%v %q", m.msg.direct, m.input.Value())
+	}
+	if _, cs := m.popup(); len(cs) != 0 {
+		t.Fatal("popup should be closed after accepting")
+	}
+	m.key(keyPress("tab"))
+	if !m.msg.direct {
+		t.Fatal("tab with the popup closed toggles direct")
+	}
+}
