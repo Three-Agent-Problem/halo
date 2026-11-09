@@ -23,7 +23,8 @@ import (
 // lead serves the lead's address. A prompt from the person starts (or continues) the
 // lead's Claude session, which orchestrates through the halo MCP tools. A question
 // from a worker (ask_lead) is not a new session: it is held open as a task until the
-// lead answers it with the answer tool.
+// lead answers it with the answer tool. Nor is a message from the person to an agent
+// during a run (human_message): it is routed to the worker or the lead at once.
 type lead struct {
 	h      *Host
 	agent  config.Agent
@@ -34,6 +35,11 @@ type lead struct {
 	runs  map[string]*run   // by root platform task
 	byCtx map[string]*run   // the newest run of each of the lead's A2A contexts
 	ctxOf map[string]string // the context of each run
+	nruns int               // runs created so far, to order them
+
+	// relay sends a human message to a subtask's worker; nil uses run.followUp.
+	// Tests replace it.
+	relay func(ctx context.Context, r *run, id, text string) error
 }
 
 func (h *Host) newLead(ctx context.Context, a config.Agent, logw io.Writer) (*lead, error) {
@@ -72,8 +78,11 @@ func (h *Host) newLead(ctx context.Context, a config.Agent, logw io.Writer) (*le
 
 // Execute implements a2asrv.AgentExecutor.
 func (l *lead) Execute(ctx context.Context, ec *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
-	if m := metaOf(ec.Message); m.Kind == "question" {
+	switch m := metaOf(ec.Message); m.Kind {
+	case "question":
 		return l.question(ctx, ec, m)
+	case "human_message":
+		return l.humanMessage(ctx, ec, m)
 	}
 	r := l.runFor(ctx, ec)
 	inner := l.exec.Execute(ctx, ec)
@@ -147,7 +156,8 @@ func (l *lead) runFor(ctx context.Context, ec *a2asrv.ExecutorContext) *run {
 	}
 	// A new prompt in a context the lead knows (a resumed conversation) is a new
 	// run: its own plan and branch, but the same Claude session, which remembers.
-	r := &run{l: l, id: id, short: shortID(id), events: make(chan event, 256), questions: map[string]*question{}}
+	l.nruns++
+	r := &run{l: l, id: id, short: shortID(id), seq: l.nruns, events: make(chan event, 256), questions: map[string]*question{}}
 	l.runs[id], l.byCtx[ec.ContextID], l.ctxOf[id] = r, r, ec.ContextID
 	return r
 }
@@ -206,10 +216,13 @@ func (l *lead) question(ctx context.Context, ec *a2asrv.ExecutorContext, m meta)
 
 // event is something wait_events hands the lead.
 type event struct {
-	Kind     string `json:"kind"` // question, human, subtask_done, subtask_failed, review, conflict, merged
+	// question, human, human_message (the person messaged an agent during the run),
+	// subtask_done, subtask_failed, review, conflict, merged
+	Kind     string `json:"kind"`
 	ID       string `json:"id,omitempty"`
 	Subtask  string `json:"subtask,omitempty"`
 	From     string `json:"from,omitempty"`
+	To       string `json:"to,omitempty"` // human_message: who the person addressed
 	Text     string `json:"text,omitempty"`
 	Approved *bool  `json:"approved,omitempty"`
 	Hint     string `json:"next,omitempty"`
@@ -225,6 +238,7 @@ type run struct {
 	l     *lead
 	id    string // the root platform task
 	short string
+	seq   int // the order runs were created in
 
 	mu        sync.Mutex
 	plan      *plan.Plan

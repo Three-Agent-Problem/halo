@@ -251,7 +251,7 @@ func serve(c *a2a.AgentCard, exec a2asrv.AgentExecutor) http.Handler {
 
 // meta is what Halo puts in message metadata under "halo".
 type meta struct {
-	Kind     string // "question" for ask_lead
+	Kind     string // "question" for ask_lead, "human_message" for a message from the person
 	Run      string // the run's root platform task
 	Subtask  string
 	Title    string
@@ -259,6 +259,8 @@ type meta struct {
 	Branch   string
 	Session  string // the Claude session to continue
 	From     string
+	To       string // human_message: the handle the person addressed (the lead or a worker)
+	Direct   bool   // human_message: deliver straight to the worker, not through the lead
 }
 
 func (m meta) asMap() map[string]any {
@@ -268,6 +270,12 @@ func (m meta) asMap() map[string]any {
 		if v != "" {
 			out[k] = v
 		}
+	}
+	if m.To != "" {
+		out["to"] = m.To
+	}
+	if m.Direct {
+		out["direct"] = true
 	}
 	return map[string]any{"halo": out}
 }
@@ -281,6 +289,8 @@ func metaOf(msg *a2a.Message) meta {
 	get := func(k string) string { s, _ := raw[k].(string); return s }
 	m.Kind, m.Run, m.Subtask, m.Title = get("kind"), get("run"), get("subtask"), get("title")
 	m.Worktree, m.Branch, m.Session, m.From = get("worktree"), get("branch"), get("session"), get("from")
+	m.To = get("to")
+	m.Direct, _ = raw["direct"].(bool)
 	return m
 }
 

@@ -1,13 +1,17 @@
 package tui
 
 import (
+	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/three-agent-problem/lagrange/client"
 
 	"github.com/three-agent-problem/halo/internal/lg"
@@ -46,6 +50,11 @@ type Backend interface {
 	// Continue makes later prompts continue run root's conversation, so the lead
 	// remembers it; "" starts a fresh one.
 	Continue(root string)
+	// Message sends the person's message to an agent during a run: to is the lead's
+	// or a worker's handle, subtask the subtask it is about ("" for the worker's
+	// current one). direct sends it straight to the worker, in its session;
+	// otherwise the lead relays it. It fails when there is no such run or subtask.
+	Message(ctx context.Context, to, subtask, text string, direct bool) error
 }
 
 // RunInfo is a past run, for /resume.
@@ -60,9 +69,14 @@ type Live struct {
 	Server, Key, Human, Lead string
 	Repo                     string // the git repository the team works on
 	Since                    int64  // where the stream starts: 0 replays everything, -1 starts now
-	c                        *client.Client
-	mu                       sync.Mutex
-	root                     string // the run whose conversation prompts continue
+	// Token returns an address token (the lead's) for Message: A2A calls with
+	// Halo's metadata need one, since the API key only works on /api. It is a func
+	// because the hosted team may provision its tokens after the TUI starts. nil or
+	// "" uses Key.
+	Token func() string
+	c     *client.Client
+	mu    sync.Mutex
+	root  string // the run whose conversation prompts continue
 }
 
 func (l *Live) client() *client.Client {
@@ -196,4 +210,36 @@ func (l *Live) Continue(root string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.root = root
+}
+
+// Message implements Backend: it sends the lead a message with Halo's
+// human_message metadata, which the hosting Halo routes without a Claude turn of
+// the lead, and returns the lead's refusal as an error.
+func (l *Live) Message(ctx context.Context, to, subtask, text string, direct bool) error {
+	meta := map[string]any{"kind": "human_message", "from": l.Human}
+	if to = strings.TrimPrefix(strings.TrimSpace(to), "@"); to != "" {
+		meta["to"] = to
+	}
+	if subtask = strings.TrimSpace(subtask); subtask != "" {
+		meta["subtask"] = subtask
+	}
+	if direct {
+		meta["direct"] = true
+	}
+	tok := l.Key
+	if l.Token != nil {
+		tok = cmp.Or(l.Token(), l.Key)
+	}
+	res, err := lg.Caller{Server: l.Server, Token: tok}.Send(ctx, lg.Call{To: l.Lead, Text: text, Meta: map[string]any{"halo": meta}})
+	if err != nil {
+		return err
+	}
+	if t, ok := res.(*a2a.Task); ok && t.Status.State != a2a.TaskStateCompleted {
+		why := lg.TaskText(t)
+		if why == "" {
+			why = string(t.Status.State)
+		}
+		return errors.New(why)
+	}
+	return nil
 }
