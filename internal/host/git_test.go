@@ -246,3 +246,18 @@ func TestMerge(t *testing.T) {
 		t.Error("MERGE_HEAD still present")
 	}
 }
+
+func TestRunDirMatchesRunBranch(t *testing.T) {
+	w := newTestWorktrees(t)
+	_, dir, err := w.runBranch(context.Background(), "abc123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := runDirIn(w.root, "abc123"); got != dir {
+		t.Errorf("runDirIn = %q; want %q", got, dir)
+	}
+	root, _ := cacheRoot(w.repo)
+	if got, err := RunDir(w.repo, "abc123"); err != nil || got != runDirIn(root, "abc123") {
+		t.Errorf("RunDir = %q, %v", got, err)
+	}
+}

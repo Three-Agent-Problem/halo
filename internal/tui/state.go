@@ -158,6 +158,8 @@ type State struct {
 	Hint string
 	// Shells are the processes the hosted agents run.
 	Shells []Shell
+	// Preview is the live preview of the run, when it is a web project.
+	Preview Preview
 
 	Focus       string
 	focusAt     time.Time

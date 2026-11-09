@@ -28,6 +28,9 @@ type Options struct {
 	// nil when this Halo only watches.
 	Feed  <-chan Update
 	Procs Procs
+	// Preview finds the live preview of the run with this short id: the run
+	// worktree and the command that serves it, or ok=false for a non-web project.
+	Preview func(short string) (dir, cmd string, ok bool)
 }
 
 type mode int
@@ -58,25 +61,26 @@ type (
 )
 
 type model struct {
-	o         Options
-	st        *State
-	ui        *UI
-	w, h      int
-	frame     int
-	connected bool
-	online    int
-	waits     []Wait
-	mode      mode
-	input     textinput.Model
-	decision  string
-	flash     string
-	flashAt   time.Time
-	cancelArm time.Time
-	quitArm   time.Time
-	deleteArm string
-	deleteAt  time.Time
-	picker    *picker
-	ctx       context.Context
+	previewBranch string // the run branch st.Preview was resolved for
+	o             Options
+	st            *State
+	ui            *UI
+	w, h          int
+	frame         int
+	connected     bool
+	online        int
+	waits         []Wait
+	mode          mode
+	input         textinput.Model
+	decision      string
+	flash         string
+	flashAt       time.Time
+	cancelArm     time.Time
+	quitArm       time.Time
+	deleteArm     string
+	deleteAt      time.Time
+	picker        *picker
+	ctx           context.Context
 }
 
 func newModel(ctx context.Context, o Options) *model {
@@ -422,6 +426,11 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	}
+	if u.Focus == pPlan {
+		if cmd, ok := m.previewKey(key); ok {
+			return m, cmd
+		}
+	}
 	if u.Focus == pShells && m.o.Procs != nil {
 		if cmd, ok := m.shellKey(key); ok {
 			return m, cmd
@@ -599,6 +608,10 @@ func (m *model) View() tea.View {
 }
 
 func (m *model) render(now time.Time) string {
+	if m.st.Plan != nil && m.st.Plan.Branch != m.previewBranch {
+		m.previewBranch = m.st.Plan.Branch
+		m.st.Preview = m.previewFor(m.previewBranch)
+	}
 	sc := Screen{W: m.w, H: m.h, Frame: m.frame, Now: now, Server: m.o.Server, Connected: m.connected,
 		Online: m.online, Waiting: len(m.waits), Flash: m.flash, UI: m.ui, Team: "team here", Procs: m.o.Procs != nil}
 	if m.o.Team == nil {
@@ -616,7 +629,7 @@ func (m *model) render(now time.Time) string {
 
 // paneKeys are the footer hints of the focused panel.
 var paneKeys = map[int][][2]string{
-	pPlan: {{"enter", "subtask"}}, pOrbit: {{"enter", "bigger"}}, pAgent: {{"h/l", "agent"}, {"v", "live/calls"}, {"enter", "open"}},
+	pPlan: {{"enter", "subtask"}, {"o", "open preview"}, {"p", "start preview"}}, pOrbit: {{"enter", "bigger"}}, pAgent: {{"h/l", "agent"}, {"v", "live/calls"}, {"enter", "open"}},
 	pComms: {{"enter", "read"}, {"f", "filter"}}, pCommits: {{"enter", "diff"}}, pEvents: {{"enter", "json"}}, pRoster: {{"enter", "watch"}, {"n", "add"}, {"m", "model"}, {"d", "remove"}},
 	pShells: {{"enter", "output"}, {"o", "open port"}, {"d d", "stop"}},
 }
