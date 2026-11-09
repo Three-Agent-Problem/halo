@@ -36,6 +36,7 @@ var bindings = []binding{
 	{"4 comms", "F", "clear the filter"},
 	{"4 comms", "enter", "read the whole message"},
 	{"5 commits", "enter", "the commit's diff (git show)"},
+	{"5 commits", "+", "the branch graph with stats, refs and a legend of which lane is which worker"},
 	{"5 commits", "[ / ]", "previous / next commit while a diff is open"},
 	{"6 events", "enter", "the raw activity entry as JSON"},
 	{"7 roster", "enter", "watch that agent in panel 3"},

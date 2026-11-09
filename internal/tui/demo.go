@@ -27,6 +27,7 @@ type Demo struct {
 	answer  chan string
 	commits []Commit
 	diffs   map[string]string
+	tips    map[string]string // branch → its newest fake commit
 	feed    chan Update
 	shells  []Shell
 	outs    map[string]string
@@ -157,6 +158,21 @@ func (d *Demo) commit(subject string, files ...string) {
 		b.WriteString(" // existing code stays as it was\n-\treturn nil\n+\tif err := validate(in); err != nil {\n+\t\treturn fmt.Errorf(\"invalid input: %w\", err)\n+\t}\n+\treturn store.Save(ctx, in)\n }\n")
 	}
 	c.SHA = sha
+	// Branches like a real run: each subtask on its own branch off the run
+	// branch, merged back into it; the run landing on main.
+	if d.tips == nil {
+		d.tips = map[string]string{"run": "base", "main": "base"}
+	}
+	tip := func(b string) string { return nonEmpty(d.tips[b], d.tips["run"]) }
+	switch {
+	case strings.HasPrefix(subject, "halo: merge halo/"):
+		c.Parents, d.tips["main"] = []string{d.tips["main"], d.tips["run"]}, sha
+	case strings.HasPrefix(subject, "halo: merge "):
+		c.Parents, d.tips["run"] = []string{d.tips["run"], tip(c.Sub)}, sha
+		delete(d.tips, c.Sub)
+	default:
+		c.Parents, d.tips[c.Sub] = []string{tip(c.Sub)}, sha
+	}
 	d.commits = append(d.commits, c)
 	d.diffs[sha] = b.String()
 }
@@ -230,7 +246,7 @@ func (d *Demo) reply(id, text string) {
 func (d *Demo) run(ctx context.Context) {
 	root := fmt.Sprintf("demo-%06x", rand.IntN(0xffffff))
 	d.mu.Lock()
-	d.commits = nil
+	d.commits, d.tips = nil, nil
 	d.mu.Unlock()
 	lead, rev := d.h("lead"), d.h("reviewer")
 	h1, s1, s2, o1 := d.h("haiku-1"), d.h("sonnet-1"), d.h("sonnet-2"), d.h("opus-1")

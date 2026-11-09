@@ -18,7 +18,8 @@ type Commit struct {
 	SHA, Author, Subject, Refs string
 	At                         time.Time
 	Files, Add, Del            int
-	Sub                        string // the subtask, from the subject ("halo: S2 …")
+	Sub                        string   // the subtask, from the subject ("halo: S2 …")
+	Parents                    []string // parent SHAs, first parent first
 }
 
 // Short is the abbreviated SHA.
@@ -46,6 +47,7 @@ func (s *State) SetCommits(cs []Commit) {
 	}
 	if added {
 		sort.SliceStable(s.Commits, func(i, j int) bool { return s.Commits[i].At.Before(s.Commits[j].At) })
+		s.Commits = orderCommits(s.Commits)
 	}
 }
 
@@ -71,7 +73,7 @@ func gitOut(ctx context.Context, dir string, args ...string) (string, error) {
 	return out.String(), nil
 }
 
-const logFormat = "--format=%x1e%H%x1f%ct%x1f%an%x1f%D%x1f%s"
+const logFormat = "--format=%x1e%H%x1f%P%x1f%ct%x1f%an%x1f%D%x1f%s"
 
 // GitCommits lists a run's commits in repo: everything on its branches
 // (halo/<short> and halo/<short>-*), plus what Halo committed on the checked-out
@@ -113,11 +115,11 @@ func parseLog(out string) []Commit {
 		}
 		head, stat, _ := strings.Cut(rec, "\n")
 		f := strings.Split(head, "\x1f")
-		if len(f) < 5 {
+		if len(f) < 6 {
 			continue
 		}
-		secs, _ := strconv.ParseInt(f[1], 10, 64)
-		c := Commit{SHA: f[0], At: time.Unix(secs, 0), Author: f[2], Refs: f[3], Subject: f[4]}
+		secs, _ := strconv.ParseInt(f[2], 10, 64)
+		c := Commit{SHA: f[0], Parents: strings.Fields(f[1]), At: time.Unix(secs, 0), Author: f[3], Refs: f[4], Subject: f[5]}
 		if m := subRe.FindStringSubmatch(c.Subject); m != nil {
 			c.Sub = m[1]
 		}

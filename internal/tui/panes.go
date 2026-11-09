@@ -461,40 +461,94 @@ func (s *State) commitsPane(w, h int, size Size, focused bool, sc Screen) (strin
 		}
 		return title, right, []string{c("dim", msg)}
 	}
-	items := make([][]string, len(s.Commits))
-	for i, cm := range s.Commits {
-		who := ""
+	who := func(cm Commit) string {
 		if s.Plan != nil && cm.Sub != "" {
 			if st := s.Plan.Get(cm.Sub); st != nil && st.Worker != "" {
-				who = s.Short(st.Worker)
+				return s.Short(st.Worker)
 			}
 		}
-		key := "fg"
-		if who != "" {
-			key = modelKey(s.model(s.Prefix + "-" + strings.TrimPrefix(who, "@")))
+		return ""
+	}
+	key := func(cm Commit) string {
+		if len(cm.Parents) > 1 || isMerge(cm.Subject) {
+			return "hub"
 		}
-		merge := strings.HasPrefix(cm.Subject, "halo: merge") || strings.HasPrefix(cm.Subject, "Merge ")
+		if w := who(cm); w != "" {
+			return modelKey(s.model(s.Prefix + "-" + strings.TrimPrefix(w, "@")))
+		}
+		return "mute"
+	}
+	rows := graph(s.Commits, key)
+	gw := min(graphWidth(rows), max(4, w/3))
+	big := size > sizeNormal
+	var head []string
+	if big {
+		head = []string{s.graphLegend(key, w-2), ""}
+	}
+	items := make([][]string, len(s.Commits))
+	for i, cm := range s.Commits {
 		subject := strings.TrimPrefix(cm.Subject, "halo: ")
-		icon := c(key+"!", "●")
-		if merge {
-			icon = c("hub!", "◆")
+		line := renderCells(rows[i].cells, gw) + c("hub", cm.Short()) + " "
+		if big {
+			line += c("reply", pad(fmt.Sprintf("+%d", cm.Add), 5)) + c("fail", pad(fmt.Sprintf("−%d", cm.Del), 5))
 		}
-		stat := c("reply", pad(fmt.Sprintf("+%d", cm.Add), 5)) + c("fail", pad(fmt.Sprintf("−%d", cm.Del), 5))
-		line := icon + " " + c("hub", cm.Short()) + " " + stat + c("fg", subject)
+		line += c(pick(key(cm) == "hub", "mute", "fg"), subject)
+		if refs := shortRefs(cm.Refs); big && refs != "" {
+			line += " " + c("hub!", "("+refs+")")
+		}
 		item := []string{line}
-		if size > sizeNormal {
-			bits := []string{ago(sc.Now.Sub(cm.At)), fmt.Sprintf("%d files", cm.Files)}
-			if who != "" {
-				bits = append(bits, who)
+		if big {
+			bits := []string{ago(sc.Now.Sub(cm.At))}
+			if key(cm) != "hub" {
+				bits = append(bits, fmt.Sprintf("%d files", cm.Files))
+				if w := who(cm); w != "" {
+					bits = append(bits, w)
+				}
 			}
-			if cm.Refs != "" {
-				bits = append(bits, cm.Refs)
-			}
-			item = append(item, "    "+c("dim", strings.Join(bits, " · ")))
+			item = append(item, renderCells(rows[i].cont, gw)+c("dim", strings.Join(bits, " · ")))
 		}
 		items[i] = item
 	}
-	return title, right, listLines(items, sc.UI.Cur[pCommits], h, focused, false)
+	list := listLines(items, sc.UI.Cur[pCommits], h-len(head), focused, false)
+	return title, right, append(head, list...)
+}
+
+func isMerge(subject string) bool {
+	return strings.HasPrefix(subject, "halo: merge") || strings.HasPrefix(subject, "Merge ")
+}
+
+// shortRefs trims git's %D decoration to the branch names.
+func shortRefs(refs string) string {
+	var out []string
+	for _, r := range strings.Split(refs, ", ") {
+		r = strings.TrimPrefix(strings.TrimSpace(r), "HEAD -> ")
+		if r != "" && r != "HEAD" {
+			out = append(out, r)
+		}
+	}
+	return strings.Join(out, ", ")
+}
+
+// graphLegend names the graph's colors: one per worker that committed, and the
+// merges onto the run branch.
+func (s *State) graphLegend(key func(Commit) string, w int) string {
+	parts := []string{c("hub!", "◆") + c("dim", " merge")}
+	seen := map[string]bool{}
+	for _, cm := range s.Commits {
+		k := key(cm)
+		if k == "hub" || cm.Sub == "" || seen[cm.Sub] {
+			continue
+		}
+		seen[cm.Sub] = true
+		label := cm.Sub
+		if s.Plan != nil {
+			if st := s.Plan.Get(cm.Sub); st != nil && st.Worker != "" {
+				label += " " + s.Short(st.Worker)
+			}
+		}
+		parts = append(parts, c(k+"!", "●")+c("dim", " "+label))
+	}
+	return fit(strings.Join(parts, "  "), w)
 }
 
 func ago(d time.Duration) string {

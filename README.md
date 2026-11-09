@@ -49,7 +49,7 @@ Like lazygit: every panel has a number and `enter` opens the selected item. `+` 
 | `2` orbit | every message travelling through Lagrange | (grows it) |
 | `3` agent | live: the agent's raw Claude Code output (thinking, messages, each tool call with its output); `v` switches to the tool calls Lagrange saw, `h`/`l` switch agents | the whole entry: a tool call's input and full output |
 | `4` comms | agent ⇄ agent messages, wrapped (`f` filters by agent) | the whole message |
-| `5` commits | the run's commits, live | the diff (`[` `]` previous/next) |
+| `5` commits | the run's commits as a branch graph, live: one lane per subtask branch, colored by its worker's model, merges as `◆`; grown: stats, refs, a legend | the diff (`[` `]` previous/next) |
 | `6` events | the raw Lagrange activity feed | the entry as JSON |
 | `7` roster | the team; `n` add · `m` model · `d d` remove · `R` restart | (watch that agent in 3) |
 | `8` shells | every command the agents run and every server they leave up, with its ports; `o` opens the port, `d d` stops it and its children | the live output, command, cwd and ports |
