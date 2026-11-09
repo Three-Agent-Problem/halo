@@ -40,6 +40,9 @@ type lead struct {
 	// relay sends a human message to a subtask's worker; nil uses run.followUp.
 	// Tests replace it.
 	relay func(ctx context.Context, r *run, id, text string) error
+	// cancel cancels a worker's task; nil cancels it through Lagrange as the
+	// lead. Tests replace it.
+	cancel func(ctx context.Context, worker, task string) error
 }
 
 func (h *Host) newLead(ctx context.Context, a config.Agent, logw io.Writer) (*lead, error) {
@@ -83,6 +86,8 @@ func (l *lead) Execute(ctx context.Context, ec *a2asrv.ExecutorContext) iter.Seq
 		return l.question(ctx, ec, m)
 	case "human_message":
 		return l.humanMessage(ctx, ec, m)
+	case "stop_subtask":
+		return l.stopSubtask(ctx, ec, m)
 	}
 	r := l.runFor(ctx, ec)
 	inner := l.exec.Execute(ctx, ec)

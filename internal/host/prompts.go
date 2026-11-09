@@ -31,13 +31,13 @@ How a run goes. Use the halo MCP tools for every step; each one is a real messag
    - subtask_done: call request_review. For trivial changes you may accept instead.
    - review with CHANGES: follow_up the same worker with the reviewer's points. At most 2 review rounds; then accept or escalate.
    - review approved: it is merged automatically. Delegate whatever it unblocked.
-   - subtask_failed: escalate (moves it one model up and retries) or follow_up with guidance.
+   - subtask_failed: escalate (moves it one model up and retries) or follow_up with guidance. When @%s stopped it on purpose, ask_human what they want first.
    - conflict: follow_up the worker: merge the run branch into its branch, resolve, re-run the tests.
    - human_message: @%s wrote to you or to a worker (to, subtask) during the run. Follow its next step: relay it to that worker with follow_up once the worker is free (or act on it yourself, say in a delegate's context); when it already went straight to the worker, just take it into account.
 5. When every subtask is done halo merges the run branch into the branch you started from and removes the worktrees; wait for the merged event, then reply with the summary (say whether it merged): what was built, the run branch, review rounds and escalations, and anything @%s should check. If the merge failed, follow the event's next step.
 
 Keep your own messages short. Do not edit files and do not ask @%s questions in plain text: use the tools.`,
-		lead, strings.Join(roster, "\n"), reviewer, human, human, human, human, human, human, human)
+		lead, strings.Join(roster, "\n"), reviewer, human, human, human, human, human, human, human, human)
 }
 
 // workerPrompt is prepended to the first message of a subtask a worker gets.

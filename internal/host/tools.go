@@ -252,6 +252,7 @@ func (h *Host) leadMCP() http.Handler {
 // subRT is where a subtask's current attempt lives.
 type subRT struct {
 	branch, dir, session, worker string
+	stoppedBy                    string // the person who stopped the current attempt
 }
 
 func (r *run) rt(id string) *subRT {
@@ -479,15 +480,32 @@ func (r *run) watchWork(id, worker, task string) {
 		if err != nil {
 			return
 		}
-		if state == a2a.TaskStateCompleted {
-			r.update(id, func(s *plan.Subtask) { s.Status, s.Note = plan.Ready, firstLine(text) })
-			r.push(event{Kind: "subtask_done", Subtask: id, From: "@" + worker, Text: clip(text, 1500), Hint: "request_review, or accept if trivial"})
-			return
-		}
-		r.update(id, func(s *plan.Subtask) { s.Status, s.Note = plan.Failed, firstLine(nonEmpty(text, string(state))) })
-		r.push(event{Kind: "subtask_failed", Subtask: id, From: "@" + worker, Text: clip(nonEmpty(text, string(state)), 1500),
-			Hint: "escalate, or follow_up with guidance"})
+		r.workEnded(id, worker, state, text)
 	}()
+}
+
+// workEnded records how a worker's attempt at subtask id ended and tells the lead.
+func (r *run) workEnded(id, worker string, state a2a.TaskState, text string) {
+	if state == a2a.TaskStateCompleted {
+		r.update(id, func(s *plan.Subtask) { s.Status, s.Note = plan.Ready, firstLine(text) })
+		r.push(event{Kind: "subtask_done", Subtask: id, From: "@" + worker, Text: clip(text, 1500), Hint: "request_review, or accept if trivial"})
+		return
+	}
+	r.mu.Lock()
+	by := ""
+	if rt := r.subs[id]; rt != nil {
+		by, rt.stoppedBy = rt.stoppedBy, ""
+	}
+	r.mu.Unlock()
+	if by != "" {
+		r.update(id, func(s *plan.Subtask) { s.Status, s.Note = plan.Failed, "stopped by "+by })
+		r.push(event{Kind: "subtask_failed", Subtask: id, From: by, Text: by + " stopped @" + worker + "'s work on " + id + " on purpose.",
+			Hint: "don't retry or escalate on your own: ask_human what they want (re-delegate with new context, change the plan, or drop it)"})
+		return
+	}
+	r.update(id, func(s *plan.Subtask) { s.Status, s.Note = plan.Failed, firstLine(nonEmpty(text, string(state))) })
+	r.push(event{Kind: "subtask_failed", Subtask: id, From: "@" + worker, Text: clip(nonEmpty(text, string(state)), 1500),
+		Hint: "escalate, or follow_up with guidance"})
 }
 
 func (r *run) followUp(ctx context.Context, id, message string) (*mcp.CallToolResult, out, error) {

@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/three-agent-problem/halo/internal/lg"
+	"github.com/three-agent-problem/halo/internal/plan"
 )
 
 // Options configure the TUI.
@@ -87,8 +88,9 @@ type model struct {
 	flash         string
 	flashAt       time.Time
 	cancelArm     time.Time
-	quitAsk       bool   // the quit dialog is open
-	qf            *qform // the questions being answered (kept across esc)
+	quitAsk       bool     // the quit dialog is open
+	confirm       *confirm // a y/n question in front of an action
+	qf            *qform   // the questions being answered (kept across esc)
 	deleteArm     string
 	deleteAt      time.Time
 	picker        *picker
@@ -316,6 +318,17 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 	if key == "ctrl+c" {
 		return m.quit()
+	}
+	if m.confirm != nil {
+		cf := m.confirm
+		switch key {
+		case "y", "Y", "enter":
+			m.confirm = nil
+			return m, cf.yes()
+		case "n", "N", "esc", "q":
+			m.confirm = nil
+		}
+		return m, nil
 	}
 	if m.picker != nil {
 		return m.pickerKey(k)
@@ -622,18 +635,66 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 			return m, m.wantDiff()
 		}
 	case "x":
+		if st := m.stoppable(); st != nil {
+			sid, who, ctx, b := st.ID, m.st.Short(st.Worker), m.ctx, m.o.Backend
+			m.confirm = &confirm{
+				title: "STOP",
+				q:     fmt.Sprintf("Stop %s %s (%s %s)?", st.ID, st.Title, st.Model, who),
+				what:  "Its Claude turn is canceled; the lead asks you what next.",
+				yes: func() tea.Cmd {
+					return func() tea.Msg { return doneMsg{"stopping " + sid, b.StopSubtask(ctx, sid)} }
+				},
+			}
+			return m, nil
+		}
 		if m.st.Root == "" || terminal(m.st.RootState) {
 			return m, nil
 		}
 		if time.Since(m.cancelArm) > 3*time.Second {
 			m.cancelArm = time.Now()
-			m.say("press x again to cancel the run")
+			m.say("press x again to cancel the whole run")
 			return m, nil
 		}
 		root := m.st.Root
 		return m, func() tea.Msg { return doneMsg{"run canceled", m.o.Backend.Cancel(m.ctx, root)} }
 	}
 	return m, nil
+}
+
+// confirm is a y/n dialog in front of an action.
+type confirm struct {
+	title, q, what string
+	yes            func() tea.Cmd
+}
+
+func (cf *confirm) box() []string {
+	lines := []string{"", "  " + c("hi!", cf.q), "  " + c("mute", cf.what), "",
+		"  " + c("fail!", "y") + c("mute", " yes   ") + c("reply!", "n") + c("mute", " no"), ""}
+	w := 4 + max(ansi.StringWidth(cf.q), ansi.StringWidth(cf.what)) + 4
+	return strings.Split(box(max(w, 40), len(lines)+2, c("ask!", cf.title), "", lines, true), "\n")
+}
+
+// stoppable is the running subtask x stops: the one selected in the plan, or
+// the focused agent's in the agent panel.
+func (m *model) stoppable() *plan.Subtask {
+	if m.st.Plan == nil {
+		return nil
+	}
+	var st *plan.Subtask
+	switch m.ui.Focus {
+	case pPlan:
+		if sel := m.ui.Cur[pPlan].sel; sel < len(m.st.Plan.Subtasks) {
+			st = m.st.Plan.Subtasks[sel]
+		}
+	case pAgent:
+		if a := m.st.Agents[m.st.Focus]; a != nil && a.Sub != "" {
+			st = m.st.Plan.Get(a.Sub)
+		}
+	}
+	if st == nil || (st.Status != plan.Running && st.Status != plan.Asking) {
+		return nil
+	}
+	return st
 }
 
 // dropWait forgets a wait the human just answered, so the header updates
@@ -745,6 +806,9 @@ func (m *model) render(now time.Time) string {
 	if m.mode == modeQuestions && m.qf != nil && m.w >= 80 && m.h >= 24 {
 		sc.Overlay = m.qf.box(m.st, min(m.w-8, 100), m.h-4, m.frame)
 	}
+	if m.confirm != nil && m.w >= 80 && m.h >= 24 {
+		sc.Overlay = m.confirm.box()
+	}
 	if m.quitAsk && m.w >= 80 && m.h >= 24 {
 		sc.Overlay = m.quitBox()
 	}
@@ -753,7 +817,7 @@ func (m *model) render(now time.Time) string {
 
 // paneKeys are the footer hints of the focused panel.
 var paneKeys = map[int][][2]string{
-	pPlan: {{"enter", "subtask"}, {"o", "open preview"}, {"p", "start preview"}, {"m", "message"}}, pOrbit: {{"enter", "bigger"}, {"m", "message"}}, pAgent: {{"h/l", "agent"}, {"v", "live/calls"}, {"enter", "open"}, {"m", "message"}},
+	pPlan: {{"enter", "subtask"}, {"o", "open preview"}, {"p", "start preview"}, {"m", "message"}, {"x", "stop worker"}}, pOrbit: {{"enter", "bigger"}, {"m", "message"}}, pAgent: {{"h/l", "agent"}, {"v", "live/calls"}, {"enter", "open"}, {"m", "message"}, {"x", "stop"}},
 	pComms: {{"enter", "read"}, {"f", "filter"}}, pCommits: {{"enter", "diff"}}, pEvents: {{"enter", "json"}}, pRoster: {{"enter", "watch"}, {"n", "add"}, {"m", "model"}, {"d", "remove"}},
 	pShells: {{"enter", "output"}, {"o", "open port"}, {"d d", "stop"}},
 }
@@ -770,6 +834,8 @@ func (m *model) footer() string {
 	switch {
 	case m.quitAsk:
 		keys = k("y/⏎", "quit") + k("n/esc", "stay")
+	case m.confirm != nil:
+		keys = k("y/⏎", "yes") + k("n/esc", "no")
 	case m.picker != nil:
 		keys = k("↑↓", "choose") + k("enter", "resume") + k("type", "filter") + k("esc", "close")
 	case m.ui.Help:

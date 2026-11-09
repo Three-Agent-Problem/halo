@@ -47,6 +47,21 @@ func (c Caller) Send(ctx context.Context, call Call) (a2a.SendMessageResult, err
 	return res, nil
 }
 
+// Cancel cancels a task this address sent to address to.
+func (c Caller) Cancel(ctx context.Context, to, taskID string) error {
+	cl, err := a2aclient.NewFromEndpoints(ctx,
+		[]*a2a.AgentInterface{a2a.NewAgentInterface(strings.TrimRight(c.Server, "/")+"/a/"+to+"/rpc", a2a.TransportProtocolJSONRPC)},
+		a2aclient.WithCallInterceptors(delegate.Interceptor(c.Token)))
+	if err != nil {
+		return err
+	}
+	defer cl.Destroy()
+	if _, err := cl.CancelTask(ctx, &a2a.CancelTaskRequest{ID: a2a.TaskID(taskID)}); err != nil {
+		return fmt.Errorf("canceling @%s's task: %w", to, err)
+	}
+	return nil
+}
+
 // parent sets the Lagrange-Task header, so the call nests under the task it is part of.
 type parent string
 

@@ -122,6 +122,17 @@ func (d *Demo) Message(_ context.Context, to, subtask, text string, direct bool)
 	return nil
 }
 
+// StopSubtask implements Backend: the scripted run goes on, but the request shows.
+func (d *Demo) StopSubtask(_ context.Context, subtask string) error {
+	d.mu.Lock()
+	d.msgs++
+	id := fmt.Sprintf("demo-stop-%d", d.msgs)
+	d.mu.Unlock()
+	d.task(id, "", d.Human, d.h("lead"), "stop "+subtask)
+	d.state(id, "TASK_STATE_COMPLETED", "Stopping "+subtask+" (the demo's script goes on).")
+	return nil
+}
+
 // Commits implements Backend: the commits the scripted run made.
 func (d *Demo) Commits(context.Context, string, time.Time) ([]Commit, error) {
 	d.mu.Lock()

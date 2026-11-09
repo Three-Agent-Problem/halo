@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/three-agent-problem/halo/internal/plan"
 )
 
@@ -80,5 +82,48 @@ func TestTimeline(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("timeline lacks %q:\n%s", want, out)
 		}
+	}
+}
+
+type stopRec struct {
+	*Demo
+	stopped []string
+}
+
+func (s *stopRec) StopSubtask(_ context.Context, sub string) error {
+	s.stopped = append(s.stopped, sub)
+	return nil
+}
+
+func TestStopWorker(t *testing.T) {
+	rec := &stopRec{Demo: &Demo{}}
+	m := boardModel()
+	m.o.Backend = rec
+	press(m, "1")
+	m.ui.Cur[pPlan].sel = 0 // S1 is done: x falls back to canceling the run
+	press(m, "x")
+	if m.confirm != nil {
+		t.Fatal("a finished subtask can't be stopped")
+	}
+	m.cancelArm = time.Time{}
+	m.ui.Cur[pPlan].sel = 1 // S2 runs
+	press(m, "x")
+	if m.confirm == nil {
+		t.Fatal("x on a running subtask asks first")
+	}
+	if out := stripANSI(m.render(time.Now())); !strings.Contains(out, "Stop S2 two (sonnet @sonnet-1)?") {
+		t.Fatalf("dialog:\n%s", out)
+	}
+	if _, cmd := m.key(tea.KeyPressMsg{Code: 'n', Text: "n"}); cmd != nil || m.confirm != nil {
+		t.Fatal("n closes it and does nothing")
+	}
+	press(m, "x")
+	_, cmd := m.key(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	if cmd == nil {
+		t.Fatal("y stops")
+	}
+	cmd()
+	if len(rec.stopped) != 1 || rec.stopped[0] != "S2" {
+		t.Fatalf("stopped %v", rec.stopped)
 	}
 }

@@ -57,6 +57,9 @@ type Backend interface {
 	// current one). direct sends it straight to the worker, in its session;
 	// otherwise the lead relays it. It fails when there is no such run or subtask.
 	Message(ctx context.Context, to, subtask, text string, direct bool) error
+	// StopSubtask stops the worker of a running subtask: its task is canceled and the
+	// lead hears it was on purpose. It fails when the subtask isn't running.
+	StopSubtask(ctx context.Context, subtask string) error
 }
 
 // RunInfo is a past run, for /resume.
@@ -230,6 +233,18 @@ func (l *Live) Message(ctx context.Context, to, subtask, text string, direct boo
 	if direct {
 		meta["direct"] = true
 	}
+	return l.toLead(ctx, text, meta)
+}
+
+// StopSubtask implements Backend, with Halo's stop_subtask metadata, which the hosting
+// Halo handles like a human_message.
+func (l *Live) StopSubtask(ctx context.Context, subtask string) error {
+	return l.toLead(ctx, "stop "+subtask, map[string]any{"kind": "stop_subtask", "from": l.Human, "subtask": subtask})
+}
+
+// toLead sends the lead a message with Halo metadata and returns its refusal
+// as an error.
+func (l *Live) toLead(ctx context.Context, text string, meta map[string]any) error {
 	tok := l.Key
 	if l.Token != nil {
 		tok = cmp.Or(l.Token(), l.Key)
