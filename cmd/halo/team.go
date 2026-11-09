@@ -144,9 +144,16 @@ func setup(ctx context.Context, st *config.State) error {
 		}
 		return line, nil
 	}
-	fmt.Println("halo: first run. It needs a Lagrange server and an API key (Settings → API keys).")
+	if server, key := config.LagrangeLogin(); server != "" && (st.Server == "" || st.Server == server) {
+		if me, err := client.New(server, key).Me(ctx); err == nil {
+			st.Server, st.Key, st.Human = server, key, me.User.Handle
+			fmt.Printf("halo: using your lagrange login: @%s on %s\n", st.Human, st.Server)
+			return st.Save()
+		}
+	}
+	fmt.Println("halo: first run. It needs a Lagrange server and an API key (lagrange login, or Settings → API keys).")
 	var err error
-	if st.Server, err = ask("server URL", nonEmpty(st.Server, "http://localhost:8090")); err != nil {
+	if st.Server, err = ask("server URL", nonEmpty(st.Server, "http://localhost:8080")); err != nil {
 		return err
 	}
 	st.Server = strings.TrimRight(st.Server, "/")

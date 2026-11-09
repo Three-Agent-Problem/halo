@@ -350,3 +350,29 @@ func (c *Config) Clone() *Config {
 	n.Agents = append([]Agent(nil), c.Agents...)
 	return &n
 }
+
+// LagrangeLogin reads the server and API key `lagrange login` saved
+// ($LAGRANGE_CONFIG, or lagrange/config.json in the user's config directory).
+// Both are empty when there is no login.
+func LagrangeLogin() (server, key string) {
+	p := os.Getenv("LAGRANGE_CONFIG")
+	if p == "" {
+		dir, err := os.UserConfigDir()
+		if err != nil {
+			return "", ""
+		}
+		p = filepath.Join(dir, "lagrange", "config.json")
+	}
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		return "", ""
+	}
+	var c struct {
+		Server string `json:"server"`
+		Key    string `json:"key"`
+	}
+	if json.Unmarshal(raw, &c) != nil || c.Server == "" || c.Key == "" {
+		return "", ""
+	}
+	return strings.TrimRight(c.Server, "/"), c.Key
+}

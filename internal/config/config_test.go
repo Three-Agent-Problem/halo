@@ -416,3 +416,17 @@ func TestTokensKeyedByServer(t *testing.T) {
 		t.Errorf("Token on b = %q, want empty", got)
 	}
 }
+
+func TestLagrangeLogin(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "config.json")
+	t.Setenv("LAGRANGE_CONFIG", p)
+	if s, k := LagrangeLogin(); s != "" || k != "" {
+		t.Fatalf("no file: got %q %q", s, k)
+	}
+	if err := os.WriteFile(p, []byte(`{"server":"http://x:8090/","key":"lgk_1","workspace":"w"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if s, k := LagrangeLogin(); s != "http://x:8090" || k != "lgk_1" {
+		t.Fatalf("got %q %q", s, k)
+	}
+}
