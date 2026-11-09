@@ -123,8 +123,7 @@ func (m *model) rosterKey(key string) (tea.Cmd, bool) {
 			return nil, true
 		}
 		m.mode = modeName
-		m.input.Placeholder = "name the new agent (e.g. sonnet-3, opus-2), then enter"
-		return m.input.Focus(), true
+		return m.startInput("name the new agent (e.g. sonnet-3, opus-2), then enter"), true
 	case "m":
 		if picked == nil || picked.Role == "human" || picked.Role == "other" || !m.editRoster() {
 			return nil, true

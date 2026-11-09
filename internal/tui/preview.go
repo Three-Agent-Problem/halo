@@ -6,10 +6,14 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/three-agent-problem/halo/internal/shells"
 )
+
+// previewRecheck is how often a run not yet known to be a web project is looked at again.
+const previewRecheck = 3 * time.Second
 
 // Preview is the live preview of a web run: where the run branch's code is and
 // the command that serves it. The zero value means the project isn't a web one.

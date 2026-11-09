@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/three-agent-problem/halo/internal/lg"
@@ -61,7 +61,8 @@ type (
 )
 
 type model struct {
-	previewBranch string // the run branch st.Preview was resolved for
+	previewBranch string    // the run branch st.Preview was resolved for
+	previewAt     time.Time // when it was last resolved
 	o             Options
 	st            *State
 	ui            *UI
@@ -71,7 +72,12 @@ type model struct {
 	online        int
 	waits         []Wait
 	mode          mode
-	input         textinput.Model
+	input         textarea.Model
+	popSel        int  // the highlighted completion
+	popOff        bool // esc closed the completion list
+	files         []string
+	filesFor      string // the run the file list was read for
+	filesLoaded   bool
 	decision      string
 	flash         string
 	flashAt       time.Time
@@ -84,10 +90,7 @@ type model struct {
 }
 
 func newModel(ctx context.Context, o Options) *model {
-	in := textinput.New()
-	in.Prompt = ""
-	in.Placeholder = promptHint
-	in.CharLimit = 2000
+	in := newInput()
 	return &model{o: o, st: o.State, ui: NewUI(), input: in, ctx: ctx}
 }
 
@@ -171,7 +174,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.w, m.h = msg.Width, msg.Height
-		m.input.SetWidth(max(20, m.w-60))
+		m.sizeInput()
 	case tickMsg:
 		m.frame++
 		m.st.Prune(time.Time(msg))
@@ -209,6 +212,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.st.Apply(lg.Entry(msg), time.Now())
 		if m.st.Root != root {
 			m.ui.Diffs = map[string]string{}
+			m.filesLoaded = false
 			m.ui.Cur[pCommits] = &pcursor{follow: true}
 		}
 		if msg.Kind == "task" && msg.Recipient == m.st.Human {
@@ -251,6 +255,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.say(msg.what)
 		}
 		return m, m.fetch()
+	case filesMsg:
+		if msg.root == m.st.Root {
+			m.files = msg.files
+		}
+	case tea.PasteMsg:
+		if m.inputText() && m.picker == nil && !m.ui.Help {
+			m.paste(msg.Content)
+		}
 	case tea.KeyPressMsg:
 		return m.key(msg)
 	}
@@ -308,22 +320,19 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		switch key {
 		case "esc":
 			m.mode = modeNormal
-			m.input.SetValue("")
-			m.input.Blur()
-			m.input.Placeholder = promptHint
+			m.clearInput()
 			return m, nil
 		case "enter":
 			name := m.input.Value()
-			m.input.SetValue("")
-			m.input.Blur()
-			m.input.Placeholder = promptHint
+			m.clearInput()
 			m.mode = modeNormal
 			return m, m.addAgent(name)
 		}
-		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(k)
-		return m, cmd
+		return m, m.typed(k)
 	case modePrompt:
+		if m.popupKey(key) {
+			return m, nil
+		}
 		switch key {
 		case "esc":
 			m.mode = modeNormal
@@ -332,8 +341,7 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		case "tab":
 			if v := m.input.Value(); strings.HasPrefix(v, "/") {
 				if cs := matchCommands(v); len(cs) > 0 {
-					m.input.SetValue(cs[0][0])
-					m.input.CursorEnd()
+					m.setInput(cs[0][0])
 				}
 			}
 			return m, nil
@@ -342,46 +350,42 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if text == "" {
 				return m, nil
 			}
-			m.input.SetValue("")
-			m.input.Blur()
+			m.clearInput()
 			m.mode = modeNormal
 			if strings.HasPrefix(text, "/") {
 				return m, m.command(text)
 			}
+			text = ExpandMentions(text, m.shortMap())
 			m.st.Follow, m.st.Hint = true, ""
 			return m, func() tea.Msg {
 				_, err := m.o.Backend.Send(m.ctx, text)
 				return doneMsg{"prompt sent to " + m.st.Short(m.st.Lead), err}
 			}
 		}
-		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(k)
-		return m, cmd
+		return m, m.typed(k)
 	case modeAnswer:
 		switch key {
 		case "esc", "q":
 			m.mode = modeNormal
 		case "y":
 			m.decision, m.mode = "approve", modeNote
-			m.input.Placeholder = "optional note, then enter to approve"
-			return m, m.input.Focus()
+			return m, m.startInput("optional note, then enter to approve")
 		case "n":
 			m.decision, m.mode = "reject", modeNote
-			m.input.Placeholder = "why? then enter to reject"
-			return m, m.input.Focus()
+			return m, m.startInput("why? then enter to reject")
 		case "r":
 			m.decision, m.mode = "", modeNote
-			m.input.Placeholder = "your answer, then enter"
-			return m, m.input.Focus()
+			return m, m.startInput("your answer, then enter")
 		}
 		return m, nil
 	case modeNote:
+		if m.popupKey(key) {
+			return m, nil
+		}
 		switch key {
 		case "esc":
 			m.mode = modeAnswer
-			m.input.SetValue("")
-			m.input.Blur()
-			m.input.Placeholder = promptHint
+			m.clearInput()
 			return m, nil
 		case "enter":
 			if len(m.waits) == 0 {
@@ -392,9 +396,8 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if decision == "" && text == "" {
 				return m, nil
 			}
-			m.input.SetValue("")
-			m.input.Blur()
-			m.input.Placeholder = promptHint
+			m.clearInput()
+			text = ExpandMentions(text, m.shortMap())
 			m.mode = modeNormal
 			m.waits = m.waits[1:]
 			return m, func() tea.Msg {
@@ -406,9 +409,7 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return doneMsg{what, err}
 			}
 		}
-		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(k)
-		return m, cmd
+		return m, m.typed(k)
 	}
 	return m.normalKey(key)
 }
@@ -443,12 +444,11 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 		u.Help, u.Query = true, ""
 	case "i", "p":
 		m.mode = modePrompt
-		return m, m.input.Focus()
+		return m, m.startInput(promptHint)
 	case "/":
 		m.mode = modePrompt
-		m.input.SetValue("/")
-		m.input.CursorEnd()
-		return m, m.input.Focus()
+		m.setInput("/")
+		return m, m.startInput(promptHint)
 	case "a":
 		if len(m.waits) > 0 {
 			m.mode = modeAnswer
@@ -580,7 +580,7 @@ func (m *model) open(n int) (tea.Model, tea.Cmd) {
 	if n == 0 && u.Focus != pAgent {
 		if m.st.Root == "" {
 			m.mode = modePrompt
-			return m, m.input.Focus()
+			return m, m.startInput(promptHint)
 		}
 		return m, nil
 	}
@@ -608,9 +608,12 @@ func (m *model) View() tea.View {
 }
 
 func (m *model) render(now time.Time) string {
-	if m.st.Plan != nil && m.st.Plan.Branch != m.previewBranch {
-		m.previewBranch = m.st.Plan.Branch
-		m.st.Preview = m.previewFor(m.previewBranch)
+	if pl := m.st.Plan; pl != nil && (pl.Branch != m.previewBranch ||
+		(!m.st.Preview.Web() && now.Sub(m.previewAt) >= previewRecheck)) {
+		// A run that isn't a web project yet may create package.json or index.html
+		// in its worktree later, so look again every few seconds.
+		m.previewBranch, m.previewAt = pl.Branch, now
+		m.st.Preview = m.previewFor(pl.Branch)
 	}
 	sc := Screen{W: m.w, H: m.h, Frame: m.frame, Now: now, Server: m.o.Server, Connected: m.connected,
 		Online: m.online, Waiting: len(m.waits), Flash: m.flash, UI: m.ui, Team: "team here", Procs: m.o.Procs != nil}
@@ -618,6 +621,7 @@ func (m *model) render(now time.Time) string {
 		sc.Team = "watch-only"
 	}
 	sc.Footer = m.footer()
+	sc.Popup = m.popupBox()
 	if (m.mode == modeAnswer || m.mode == modeNote) && len(m.waits) > 0 {
 		sc.Bottom, sc.BottomTag = m.answerPane(), fmt.Sprintf("%s asks you", m.st.Short(m.waits[0].Asker))
 	}
@@ -653,6 +657,8 @@ func (m *model) footer() string {
 			keys += c("hub!", cm[0]) + c("dim", " "+cm[1]+"  ")
 		}
 		keys += k("tab", "complete")
+	case len(m.popupCands()) > 0:
+		keys = k("↑↓", "choose") + k("tab/⏎", "accept") + k("esc", "close")
 	case m.mode == modePrompt || m.mode == modeNote || m.mode == modeName:
 		keys = k("⏎", "send") + k("esc", "back")
 	case m.mode == modeAnswer:
@@ -671,18 +677,14 @@ func (m *model) footer() string {
 		}
 		keys += k("i", "prompt") + k("?", "keys") + k("q", "quit")
 	}
-	var prompt string
-	switch m.mode {
-	case modePrompt, modeNote, modeName:
-		prompt = c("hub!", "› ") + m.input.View()
-	default:
-		text := m.st.Prompt
-		if text == "" {
-			text = "press i to describe what to build"
-		}
-		prompt = c("hub!", "› ") + c("mute", fit(firstLine(text), max(20, m.w-110)))
+	if m.inputText() {
+		return strings.Join(append(m.inputView(), " "+keys), "\n")
 	}
-	return " " + alert + prompt + "  " + keys
+	text := m.st.Prompt
+	if text == "" {
+		text = "press i to describe what to build"
+	}
+	return " " + alert + c("hub!", "› ") + c("mute", fit(firstLine(text), max(20, m.w-110))) + "  " + keys
 }
 
 func (m *model) answerPane() string {

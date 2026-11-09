@@ -120,3 +120,25 @@ func TestPreviewKeys(t *testing.T) {
 		t.Error("a watch-only Halo started the preview")
 	}
 }
+
+func TestPreviewAppearsLater(t *testing.T) {
+	web := false
+	m := previewModel(t, true, nil)
+	m.o.Preview = func(string) (string, string, bool) {
+		if !web {
+			return "", "", false
+		}
+		return "/cache/halo/abc123/_run", "npm run dev", true
+	}
+	now := time.Now()
+	if out := stripANSI(m.render(now)); strings.Contains(out, "preview  not") {
+		t.Fatalf("row before the project is web:\n%s", out)
+	}
+	web = true
+	if out := stripANSI(m.render(now.Add(time.Second))); strings.Contains(out, "preview  not") {
+		t.Error("looked again before the throttle elapsed")
+	}
+	if out := stripANSI(m.render(now.Add(previewRecheck))); !strings.Contains(out, "preview  not running — p to start") {
+		t.Errorf("row didn't appear once the project became web:\n%s", out)
+	}
+}
