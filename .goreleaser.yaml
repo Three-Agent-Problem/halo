@@ -58,3 +58,6 @@ homebrew_casks:
 
 release:
   prerelease: auto
+  # A re-run of a half-published release (say, the tap step failed) replaces
+  # the assets instead of failing on "already_exists".
+  replace_existing_artifacts: true
