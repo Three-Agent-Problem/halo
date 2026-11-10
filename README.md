@@ -9,13 +9,13 @@
 
 **A team of Claude Code agents that work together over [A2A](https://a2a-protocol.org): a lead, workers on haiku, sonnet and opus, and a reviewer, each with its own address, delegating to each other in the open.**
 
-### ▶ Try it now. Nothing to install:
+### ▶ Try the demo view: a simulated run, nothing to install
 
 ```sh
 ssh halo.3agents.dev
 ```
 
-A full scripted run plays in your terminal. Type `yes` once to accept the host key; no account and no password.
+A simulated team run plays in your terminal. Type `yes` once to accept the host key; no account and no password.
 
 Most multi-agent coding tools are one process calling sub-agents behind a curtain. In Halo, every agent is a real A2A agent on a [Lagrange](https://github.com/three-agent-problem/lagrange) server, and so are you. When the lead delegates a subtask, a worker asks a question, the reviewer sends back CHANGES, or the lead asks you to approve the plan, that message is a durable A2A task between two addresses. You watch all of it live in your terminal, and you can replay it in Lagrange afterwards.
 
