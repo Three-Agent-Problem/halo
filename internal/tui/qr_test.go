@@ -27,6 +27,10 @@ func TestQRLinesHaveEqualWidth(t *testing.T) {
 
 func TestQRQuietZoneIsLight(t *testing.T) {
 	light := qrCells[[2]bool{false, false}]
+	dark := qrCells[[2]bool{true, true}]
+	if light == dark {
+		t.Fatalf("light and dark cells render the same (%q); the quiet-zone check would be vacuous", light)
+	}
 	lines := QR("https://t.me/example_bot?start=abc123")
 	if len(lines) == 0 {
 		t.Fatal("QR returned no lines")
@@ -34,6 +38,9 @@ func TestQRQuietZoneIsLight(t *testing.T) {
 	width := ansi.StringWidth(lines[0])
 	if got := lines[0]; got != strings.Repeat(light, width) {
 		t.Errorf("first line is not a full light quiet zone")
+	}
+	if got := lines[len(lines)-1]; got != strings.Repeat(light, width) {
+		t.Errorf("last line is not a full light quiet zone")
 	}
 	for i, l := range lines {
 		if !strings.HasPrefix(l, strings.Repeat(light, 2)) {
