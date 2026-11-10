@@ -38,7 +38,7 @@ homebrew_casks:
       owner: Three-Agent-Problem
       name: homebrew-tap
       # The workflow's own GITHUB_TOKEN can't push to another repo.
-      token: '{{ envOrDefault "TAP_GITHUB_TOKEN" "" }}'
+      token: "{{ .Env.TAP_GITHUB_TOKEN }}"
     directory: Casks
     homepage: https://github.com/three-agent-problem/halo
     description: A team of Claude Code agents that work together over A2A, live in your terminal
