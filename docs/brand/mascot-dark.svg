@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-4 -4 108 188" width="108" height="188" role="img" aria-label="Halo mascot">
+<title>Halo mascot</title>
+<style>
+.halo { animation: bob 4.52s infinite step-end; }
+.eye { transform-box: fill-box; transform-origin: 50% 100%; animation: eyes 4.52s infinite step-end; }
+@keyframes bob { 0% { transform: translateY(0) } 12.17% { transform: translateY(40px) } 24.34% { transform: translateY(0) } 36.5% { transform: translateY(40px) } 48.67% { transform: translateY(0) } 63.5% { transform: translateY(40px) } }
+@keyframes eyes { 0% { transform: none } 48.67% { transform: scaleY(2) } 51.33% { transform: none } 75.66% { transform: translateY(-10px) } 91.15% { transform: none } }
+@media (prefers-reduced-motion: reduce) { .halo, .eye { animation: none } }
+</style>
+<g class="halo" fill="none" stroke="#F0455C" stroke-width="4" stroke-linecap="round">
+<path d="M15 5 Q5 20 15 35"/><path d="M85 5 Q95 20 85 35"/>
+<path d="M22 15 H78 M22 25 H78"/>
+</g>
+<g fill="#E6E9EE">
+<rect x="20" y="100" width="60" height="20"/>
+<rect x="0" y="120" width="20" height="40"/><rect x="40" y="120" width="20" height="40"/><rect x="80" y="120" width="20" height="40"/>
+<rect class="eye" x="20" y="140" width="20" height="20"/><rect class="eye" x="60" y="140" width="20" height="20"/>
+<rect x="0" y="160" width="100" height="20"/>
+</g>
+</svg>

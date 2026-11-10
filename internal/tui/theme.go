@@ -14,6 +14,8 @@ var palette = map[string]string{
 	"haiku": "#7ee787", "sonnet": "#56d4ef", "opus": "#c9a2ff", "human": "#ff8fb3",
 	"hub": "#ffcf6b", "task": "#56d4ef", "ask": "#ffb547", "reply": "#7ee787",
 	"review": "#c9a2ff", "fail": "#ff6b6b",
+	// The mascot wears the Three Agent Problem brand: crimson halo, fog body.
+	"halo": "#F0455C", "mascot": "#E6E9EE",
 }
 
 var styles = map[string]lipgloss.Style{}

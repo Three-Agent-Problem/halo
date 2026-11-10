@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/x/ansi"
 )
@@ -102,7 +103,8 @@ func helpBox(q string, w, h, frame int) []string {
 	if q == "" {
 		search = c("hub!", "/ ") + c("dim", "type to search") + cursor(frame)
 	}
-	lines := append([]string{search, ""}, helpLines(q, w-4)...)
+	head := beside(mascot(frame, 80*time.Millisecond), []string{"", "", c("hi!", "halo") + c("dim", " · every key"), search})
+	lines := append(append(head, ""), helpLines(q, w-4)...)
 	if len(lines) > h-2 {
 		lines = append(lines[:h-3], c("dim", "… type to narrow it down"))
 	}

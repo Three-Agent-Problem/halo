@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 
 	"github.com/three-agent-problem/lagrange/client"
@@ -54,6 +55,7 @@ func run(ctx context.Context, args []string) error {
 			fmt.Println("halo", version, commit)
 			return nil
 		case "help", "-h", "--help":
+			fmt.Println(strings.Join(tui.MascotANSI(), "\n") + "\n")
 			fmt.Println(`usage:
   halo setup                              set up or change the server, the team, Telegram and preferences
   halo init --server URL --key lgk_...   the same server setup with flags (scripts), creates the addresses

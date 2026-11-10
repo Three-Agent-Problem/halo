@@ -1,6 +1,11 @@
 <div align="center">
 
-# ◉ Halo
+<picture>
+<source media="(prefers-color-scheme: dark)" srcset="docs/brand/mascot-dark.svg">
+<img src="docs/brand/mascot-light.svg" width="54" height="94" alt="The Halo mascot: a small block creature under a bobbing (═══) halo">
+</picture>
+
+# Halo
 
 **A team of Claude Code agents that work together over [A2A](https://a2a-protocol.org): a lead, workers on haiku, sonnet and opus, and a reviewer, each with its own address, delegating to each other in the open.**
 

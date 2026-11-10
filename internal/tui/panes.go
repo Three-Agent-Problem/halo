@@ -105,7 +105,7 @@ func (s *State) planPane(w, h int, size Size, focused bool, sc Screen) (string, 
 	title := c("hi!", "PLAN")
 	if s.Plan == nil {
 		if s.Root == "" {
-			lines := []string{c("dim", "no run yet. press i and describe what to build.")}
+			lines := append(beside(mascot(sc.Frame, 80*time.Millisecond), []string{"", "", c("fg", "no run yet."), c("dim", "press i and describe what to build.")}), "")
 			if s.Hint != "" {
 				lines = append(lines, "")
 				for _, l := range wrapLines(s.Hint, w, 3) {

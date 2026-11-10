@@ -769,6 +769,9 @@ func (s *setup) sidebar(w int) []string {
 		}
 		lines = append(lines, " "+c(style, row)+" "+mark, "      "+c("mute", fit(sub, w-6)), "")
 	}
+	for _, l := range mascot(s.frame, 150*time.Millisecond) {
+		lines = append(lines, " "+l)
+	}
 	lines = append(lines, "", " "+c("mute", "Changes save as you go."), " "+c("reply!", "ctrl+r")+c("mute", " reverts a section"), " "+c("mute", "Come back: halo setup"))
 	return lines
 }
