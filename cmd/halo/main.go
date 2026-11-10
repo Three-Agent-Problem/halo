@@ -48,12 +48,15 @@ func run(ctx context.Context, args []string) error {
 			return mergeCmd(ctx, args[1:])
 		case "connections":
 			return connectionsCmd(ctx, args[1:])
+		case "setup":
+			return setupCmd(ctx, args[1:])
 		case "version", "--version", "-v":
 			fmt.Println("halo", version, commit)
 			return nil
 		case "help", "-h", "--help":
 			fmt.Println(`usage:
-  halo init --server URL --key lgk_...   save the Lagrange server and an API key, create the addresses
+  halo setup                              set up or change the server, the team, Telegram and preferences
+  halo init --server URL --key lgk_...   the same server setup with flags (scripts), creates the addresses
   halo agents [-config halo.yaml]         run the team headless (halo hosts it itself; this is for another machine)
   halo merge                              list finished runs (halo/<run> branches)
   halo merge <run> [--keep]               merge a run into the checked-out branch, then clean it up
@@ -124,7 +127,7 @@ func tuiCmd(ctx context.Context, args []string) error {
 		return err
 	}
 	if st.Server == "" || st.Key == "" {
-		if err := setup(ctx, st); err != nil {
+		if err := firstRun(ctx, cfg, st, rosterPath); err != nil {
 			return err
 		}
 	}

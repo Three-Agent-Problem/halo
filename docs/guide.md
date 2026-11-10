@@ -96,13 +96,14 @@ cd ~/code/your-repo
 halo
 ```
 
-The first launch asks two questions and then remembers the answers:
+The first launch opens **halo setup** on its Lagrange section:
 
-```
-halo: first run. It needs a Lagrange server and an API key (lagrange login, or Settings → API keys).
-server URL [http://localhost:8080]:        ← press enter (or type your server)
-API key: lgk_…                              ← paste the key from step 4
-```
+1. Press `enter` on **server** and type your server's URL (or keep `http://localhost:8080`), then `enter`.
+2. Press `↓`, `enter`, and paste the API key from step 4, then `enter`. Halo checks it at once: `✓ you are @you on …`.
+3. Optional, now or later: **Team** (`2`) lists the coding agents installed on this machine. Tick one with `space` to add a worker that runs it, and change models with `m`. **Telegram** (`3`) connects your phone. **Preferences** (`4`) has notifications and the preview command.
+4. `o` opens Lagrange in your browser (not over SSH). Press `q` when done. Everything was saved as you went, and `ctrl+r` in a section puts it back to how it was when setup opened.
+
+`halo setup` reopens it any time. In a script, `halo init --server URL --key lgk_…` does the server part with flags.
 
 Halo then creates the team's addresses on Lagrange (`@halo-lead`, `@halo-haiku-1`, `@halo-sonnet-1`, `@halo-sonnet-2`, `@halo-opus-1`, `@halo-reviewer`), opens a tunnel for each one, and starts their Claude Code sessions.
 

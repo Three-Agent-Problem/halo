@@ -470,3 +470,21 @@ agents:
 		t.Errorf("saved roster should write acp only for agy-1:\n%s", raw)
 	}
 }
+
+// Saving the roster keeps the preferences halo setup edits.
+func TestSaveRosterKeepsPreferences(t *testing.T) {
+	c := Default()
+	off := false
+	c.Notify, c.Preview = &off, "npm run dev"
+	p := filepath.Join(t.TempDir(), "roster.yaml")
+	if err := c.SaveRoster(p); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Notifies() || got.Preview != "npm run dev" {
+		t.Fatalf("notify=%v preview=%q", got.Notifies(), got.Preview)
+	}
+}

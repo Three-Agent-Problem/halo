@@ -194,7 +194,7 @@ func (m *model) Init() tea.Cmd {
 	cmds := []tea.Cmd{tick(), m.fetch(), m.poll(), m.fetchRuns(true), m.fetchShells()}
 	if m.connector() != nil {
 		// Whether Telegram is paired: the footer shows it, and the tip waits for it.
-		cmds = append(cmds, m.tgDo(func(ctx context.Context, c Connector) (*client.Telegram, error) { return c.Telegram(ctx) }, "", true))
+		cmds = append(cmds, tgDo(m.ctx, m.connector(), func(ctx context.Context, c Connector) (*client.Telegram, error) { return c.Telegram(ctx) }, "", true))
 	}
 	return tea.Batch(cmds...)
 }

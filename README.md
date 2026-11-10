@@ -85,6 +85,9 @@ cd ~/code/your-repo && halo      # asks for the server and the key once, then ho
 | ![The run summary card](docs/screenshots/summary.png) | ![Pairing Telegram with a QR code](docs/screenshots/telegram-pair.png) |
 | **The run summary.** It opens when the run lands (`/summary` reopens it): what was built, wall time, review rounds, escalations, cost. `c` copies it as Markdown. | **`/connections`: Telegram.** Paste a @BotFather token, scan the code, and questions reach your phone with buttons to answer. |
 
+![halo setup: the coding agents found on this machine and the team](docs/screenshots/setup.png)
+<sub>**`halo setup`**: tick the coding agents Halo may use (it finds the installed ones), then set each agent's model, command and slots. The server, Telegram and preferences are the other sections.</sub>
+
 ![The plan at full size: a timeline with a lane per agent](docs/screenshots/timeline.png)
 <sub>**`1` `+` `+` `+`: the plan at full size** is a timeline with a lane per agent: working, in review, waiting on you, and what each one does now.</sub>
 
@@ -161,7 +164,8 @@ What reaches Telegram: the lead's questions as option buttons, the plan approval
 | `halo` | The TUI. It hosts the team on this repository unless another Halo already does. |
 | `halo --demo` | A scripted run, with no server needed. |
 | `halo -watch` | Watch only. |
-| `halo init --server URL --key lgk_…` | Save the server and key, and create the addresses, without opening the TUI. |
+| `halo setup` | One screen for Lagrange (server and key; `o` opens it in the browser), the team (it finds the coding agents installed here: Claude Code, Antigravity, Codex, Gemini CLI, opencode, Goose, or any ACP command you type), Telegram and preferences. A first run opens it; come back any time. Changes save as you go, and `ctrl+r` puts the section you're in back to how it was when setup opened (it asks y/n first). |
+| `halo init --server URL --key lgk_…` | Save the server and key, and create the addresses, with flags (for scripts). |
 | `halo agents` | Run the team headless. |
 | `halo merge [run] [--keep]` | List finished runs, or merge one into the checked-out branch, then print its summary. |
 | `halo connections [--level questions\|milestones] [--pair] [--test] [--disconnect]` | Connect Telegram in the terminal (token hidden, QR code to pair); `--disconnect` starts over. |

@@ -113,8 +113,11 @@ func (d *Demo) DisconnectTelegram(context.Context) error {
 	return nil
 }
 
-// connWizard is the /connections dialog.
+// connWizard is the Telegram dialog: /connections in the TUI, and a section of
+// halo setup. It talks to Lagrange through c.
 type connWizard struct {
+	c     Connector
+	ctx   context.Context
 	st    *client.Telegram
 	token string
 	link  string
@@ -134,6 +137,11 @@ type (
 	tgPollMsg struct{}
 )
 
+func newConnWizard(ctx context.Context, c Connector) (*connWizard, tea.Cmd) {
+	w := &connWizard{c: c, ctx: ctx, busy: true}
+	return w, w.do(func(ctx context.Context, c Connector) (*client.Telegram, error) { return c.Telegram(ctx) }, "", false)
+}
+
 func (m *model) connector() Connector {
 	c, _ := m.o.Backend.(Connector)
 	return c
@@ -145,37 +153,45 @@ func (m *model) openConnections() tea.Cmd {
 		m.say("connections need a Lagrange server")
 		return nil
 	}
-	m.conn = &connWizard{busy: true}
-	return m.tgDo(func(ctx context.Context, c Connector) (*client.Telegram, error) { return c.Telegram(ctx) }, "", false)
+	var cmd tea.Cmd
+	m.conn, cmd = newConnWizard(m.ctx, m.connector())
+	return cmd
 }
 
-// tgDo runs a Connector call in the background.
-func (m *model) tgDo(f func(context.Context, Connector) (*client.Telegram, error), note string, poll bool) tea.Cmd {
-	c := m.connector()
+// tgDo runs a Connector call in the background, outside any dialog.
+func tgDo(ctx context.Context, c Connector, f func(context.Context, Connector) (*client.Telegram, error), note string, poll bool) tea.Cmd {
 	if c == nil {
 		return nil
 	}
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(m.ctx, 20*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
 		st, err := f(ctx, c)
 		return tgMsg{st: st, err: err, note: note, poll: poll}
 	}
 }
 
+func (w *connWizard) do(f func(context.Context, Connector) (*client.Telegram, error), note string, poll bool) tea.Cmd {
+	return tgDo(w.ctx, w.c, f, note, poll)
+}
+
 func tgPoll() tea.Cmd { return tea.Tick(2*time.Second, func(time.Time) tea.Msg { return tgPollMsg{} }) }
 
-// tgUpdate handles the dialog's background results.
+// tgUpdate handles background Telegram results in the TUI.
 func (m *model) tgUpdate(msg tea.Msg) tea.Cmd {
+	if msg, ok := msg.(tgMsg); ok && msg.st != nil && msg.err == nil {
+		m.tgPaired = msg.st.Paired
+	}
+	if m.conn == nil {
+		return nil
+	}
+	return m.conn.update(msg)
+}
+
+// update handles the dialog's background results.
+func (w *connWizard) update(msg tea.Msg) tea.Cmd {
 	switch msg := msg.(type) {
 	case tgMsg:
-		if msg.st != nil && msg.err == nil {
-			m.tgPaired = msg.st.Paired
-		}
-		w := m.conn
-		if w == nil {
-			return nil
-		}
 		w.busy = false
 		if msg.err != nil {
 			if !msg.poll {
@@ -188,7 +204,7 @@ func (m *model) tgUpdate(msg tea.Msg) tea.Cmd {
 		if msg.st.PairLink != "" {
 			w.link = msg.st.PairLink
 		}
-		if msg.st.Paired && !wasPaired && w.st != nil && msg.poll {
+		if msg.st.Paired && !wasPaired && msg.poll {
 			w.link, w.note = "", "✓ paired. Questions for you will arrive in Telegram too."
 		} else if msg.note != "" {
 			w.note = msg.note
@@ -197,21 +213,26 @@ func (m *model) tgUpdate(msg tea.Msg) tea.Cmd {
 			return tgPoll()
 		}
 	case tgPollMsg:
-		if m.conn == nil || m.conn.st == nil || m.conn.st.Paired {
+		if w.st == nil || w.st.Paired {
 			return nil
 		}
-		return m.tgDo(func(ctx context.Context, c Connector) (*client.Telegram, error) { return c.Telegram(ctx) }, "", true)
+		return w.do(func(ctx context.Context, c Connector) (*client.Telegram, error) { return c.Telegram(ctx) }, "", true)
 	}
 	return nil
 }
 
 // connKey handles a key while the dialog is open.
 func (m *model) connKey(k tea.KeyPressMsg) tea.Cmd {
-	w, key := m.conn, k.String()
-	if key == "esc" {
+	if k.String() == "esc" {
 		m.conn = nil
 		return nil
 	}
+	return m.conn.key(k)
+}
+
+// key handles a key (esc is the caller's).
+func (w *connWizard) key(k tea.KeyPressMsg) tea.Cmd {
+	key := k.String()
 	if w.busy {
 		return nil
 	}
@@ -227,7 +248,7 @@ func (m *model) connKey(k tea.KeyPressMsg) tea.Cmd {
 			return nil
 		}
 		w.busy, w.link = true, ""
-		return m.tgDo(func(ctx context.Context, c Connector) (*client.Telegram, error) {
+		return w.do(func(ctx context.Context, c Connector) (*client.Telegram, error) {
 			if err := c.DisconnectTelegram(ctx); err != nil {
 				return nil, err
 			}
@@ -241,7 +262,7 @@ func (m *model) connKey(k tea.KeyPressMsg) tea.Cmd {
 				return nil
 			}
 			w.busy, w.token = true, ""
-			return m.tgDo(func(ctx context.Context, c Connector) (*client.Telegram, error) { return c.ConnectTelegram(ctx, token) }, "", false)
+			return w.do(func(ctx context.Context, c Connector) (*client.Telegram, error) { return c.ConnectTelegram(ctx, token) }, "", false)
 		case "backspace":
 			if r := []rune(w.token); len(r) > 0 {
 				w.token = string(r[:len(r)-1])
@@ -257,7 +278,7 @@ func (m *model) connKey(k tea.KeyPressMsg) tea.Cmd {
 		switch key {
 		case "p":
 			w.busy = true
-			return m.tgDo(func(ctx context.Context, c Connector) (*client.Telegram, error) { return c.PairTelegram(ctx) }, "", false)
+			return w.do(func(ctx context.Context, c Connector) (*client.Telegram, error) { return c.PairTelegram(ctx) }, "", false)
 		case "l":
 			if !w.st.Paired {
 				return nil
@@ -267,13 +288,13 @@ func (m *model) connKey(k tea.KeyPressMsg) tea.Cmd {
 				next = "milestones"
 			}
 			w.busy = true
-			return m.tgDo(func(ctx context.Context, c Connector) (*client.Telegram, error) { return c.SetTelegramLevel(ctx, next) }, "saved", false)
+			return w.do(func(ctx context.Context, c Connector) (*client.Telegram, error) { return c.SetTelegramLevel(ctx, next) }, "saved", false)
 		case "t":
 			if !w.st.Paired {
 				return nil
 			}
 			w.busy = true
-			return m.tgDo(func(ctx context.Context, c Connector) (*client.Telegram, error) {
+			return w.do(func(ctx context.Context, c Connector) (*client.Telegram, error) {
 				if err := c.TestTelegram(ctx); err != nil {
 					return nil, err
 				}
@@ -286,15 +307,25 @@ func (m *model) connKey(k tea.KeyPressMsg) tea.Cmd {
 
 // connPaste takes a pasted token.
 func (m *model) connPaste(s string) {
-	if w := m.conn; w != nil && w.st != nil && !w.st.Connected {
+	if m.conn != nil {
+		m.conn.paste(s)
+	}
+}
+
+func (w *connWizard) paste(s string) {
+	if w.st != nil && !w.st.Connected {
 		w.token += strings.TrimSpace(s)
 	}
 }
 
 // connBox draws the dialog.
-func (m *model) connBox(w int) []string {
-	cw := m.conn
-	inner := w - 6
+func (m *model) connBox(width int) []string {
+	lines := m.conn.lines(width-6, m.frame, "close")
+	return strings.Split(box(width, len(lines)+2, c("task!", "TELEGRAM"), "", lines, true), "\n")
+}
+
+// lines draws the dialog's content, inner cells wide; esc does what escWord says.
+func (w *connWizard) lines(inner, frame int, escWord string) []string {
 	say := func(style, s string) []string {
 		var out []string
 		for _, l := range strings.Split(ansi.Wordwrap(s, inner, ""), "\n") {
@@ -303,11 +334,12 @@ func (m *model) connBox(w int) []string {
 		return out
 	}
 	key := func(k, what string) string { return c("reply!", k) + c("mute", " "+what+"   ") }
+	esc := key("esc", escWord)
 	lines := []string{""}
 	lines = append(lines, say("fg", "Answer Halo's questions and follow its runs from your phone, through your own Telegram bot on Lagrange.")...)
 	lines = append(lines, say("mute", "The bot only answers with buttons: approve, reject, pick an option. It can't start, stop or message anything, and typed text goes nowhere.")...)
 	lines = append(lines, "")
-	switch st := cw.st; {
+	switch st := w.st; {
 	case st == nil:
 		lines = append(lines, "  "+c("mute", "reading the connection…"))
 	case !st.Connected:
@@ -316,23 +348,23 @@ func (m *model) connBox(w int) []string {
 			"  "+c("hub!", "2")+c("fg", "  Pick a name, then a username that ends in “bot”"),
 			"  "+c("hub!", "3")+c("fg", "  Paste the token it sends you here"),
 			"")
-		masked := strings.Repeat("•", min(len([]rune(cw.token)), inner-12))
+		masked := strings.Repeat("•", min(len([]rune(w.token)), max(0, inner-12)))
 		cursor := c("reply!", "▏")
-		if cw.busy {
+		if w.busy {
 			cursor = c("mute", " checking with Telegram…")
 		}
-		lines = append(lines, "  "+c("mute", "token  ")+c("hi", masked)+cursor, "", "  "+key("enter", "connect")+key("esc", "close"))
+		lines = append(lines, "  "+c("mute", "token  ")+c("hi", masked)+cursor, "", "  "+key("enter", "connect")+esc)
 	case !st.Paired:
 		lines = append(lines, say("fg", "Connected to @"+st.BotUsername+". Now open it and tap Start: that pairs it with your chat.")...)
-		if cw.link != "" {
+		if w.link != "" {
 			lines = append(lines, "")
-			for _, l := range QR(cw.link) {
+			for _, l := range QR(w.link) {
 				lines = append(lines, "  "+l)
 			}
-			lines = append(lines, "", "  "+c("mute", "scan it with your phone, or open ")+c("task", cw.link),
-				"  "+c("mute", "the link works once, for 10 minutes · waiting for you to tap Start ")+c("hub", spinner(m.frame)))
+			lines = append(lines, "", "  "+c("mute", "scan it with your phone, or open ")+c("task", w.link),
+				"  "+c("mute", "the link works once, for 10 minutes · waiting for you to tap Start ")+c("hub", spinner(frame)))
 		}
-		lines = append(lines, "", "  "+key("p", "new link")+key("d d", "disconnect")+key("esc", "close"))
+		lines = append(lines, "", "  "+key("p", "new link")+key("d d", "disconnect")+esc)
 	default:
 		level := "questions, plus runs' news and when they finish"
 		if st.Level == "questions" {
@@ -343,21 +375,20 @@ func (m *model) connBox(w int) []string {
 		if st.MutedUntil != nil {
 			lines = append(lines, "  "+c("mute", "muted until "+st.MutedUntil.Local().Format("15:04")+" (/unmute in Telegram)"))
 		}
-		if cw.link != "" {
-			lines = append(lines, "", "  "+c("mute", "to pair another chat, open ")+c("task", cw.link))
+		if w.link != "" {
+			lines = append(lines, "", "  "+c("mute", "to pair another chat, open ")+c("task", w.link))
 		}
-		lines = append(lines, "", "  "+key("t", "send a test")+key("l", "switch what it sends")+key("p", "pair another chat")+key("d d", "disconnect")+key("esc", "close"))
+		lines = append(lines, "", "  "+key("t", "send a test")+key("l", "switch what it sends")+key("p", "pair another chat")+key("d d", "disconnect")+esc)
 	}
-	if cw.err != "" {
+	if w.err != "" {
 		lines = append(lines, "")
-		lines = append(lines, say("fail", cw.err)...)
+		lines = append(lines, say("fail", w.err)...)
 	}
-	if cw.note != "" {
+	if w.note != "" {
 		lines = append(lines, "")
-		lines = append(lines, say("reply", cw.note)...)
+		lines = append(lines, say("reply", w.note)...)
 	}
-	lines = append(lines, "")
-	return strings.Split(box(w, len(lines)+2, c("task!", "TELEGRAM"), "", lines, true), "\n")
+	return append(lines, "")
 }
 
 func spinner(frame int) string {

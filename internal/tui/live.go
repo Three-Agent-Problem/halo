@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -757,6 +758,19 @@ func (m *model) openPort(sh Shell) {
 	} else {
 		m.say("opened " + url)
 	}
+}
+
+// canOpenBrowser reports whether there is a browser here to open: not over SSH,
+// and on Linux only with a display.
+var canOpenBrowser = func() bool {
+	if os.Getenv("SSH_CONNECTION") != "" || os.Getenv("SSH_TTY") != "" {
+		return false
+	}
+	switch runtime.GOOS {
+	case "darwin", "windows":
+		return true
+	}
+	return os.Getenv("DISPLAY") != "" || os.Getenv("WAYLAND_DISPLAY") != ""
 }
 
 // openURL opens url in the browser.

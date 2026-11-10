@@ -334,11 +334,13 @@ func (c *Config) SaveRoster(path string) error {
 		return err
 	}
 	out := struct {
-		Server string  `yaml:"server,omitempty"`
-		Prefix string  `yaml:"prefix"`
-		ACP    string  `yaml:"acp,omitempty"`
-		Agents []Agent `yaml:"agents"`
-	}{c.Server, c.Prefix, c.ACP, c.Agents}
+		Server  string  `yaml:"server,omitempty"`
+		Prefix  string  `yaml:"prefix"`
+		ACP     string  `yaml:"acp,omitempty"`
+		Preview string  `yaml:"preview,omitempty"`
+		Notify  *bool   `yaml:"notify,omitempty"`
+		Agents  []Agent `yaml:"agents"`
+	}{c.Server, c.Prefix, c.ACP, c.Preview, c.Notify, c.Agents}
 	if out.ACP == "claude-agent-acp" {
 		out.ACP = ""
 	}
@@ -349,7 +351,7 @@ func (c *Config) SaveRoster(path string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	head := "# Halo's team, shared by every repo. Edit it in Halo: panel 7 (roster).\n"
+	head := "# Halo's team, shared by every repo. Edit it with halo setup, or in Halo: panel 7 (roster).\n"
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, append([]byte(head), raw...), 0o600); err != nil {
 		return err
