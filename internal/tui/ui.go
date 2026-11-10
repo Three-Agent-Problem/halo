@@ -26,9 +26,17 @@ const (
 	sizeMin    Size = iota - 1 // a one-line bar, like a closed accordion
 	sizeNormal                 // the default layout
 	sizeColumn                 // the panel takes its whole column (comms: half the height)
-	sizeWide                   // its column also takes the orbit's width
+	sizeWide                   // its column also takes the orbit's width (comms: the left side, the rest compact beside it)
 	sizeFull                   // the panel takes the whole screen
 )
+
+// label is how the tab bar names panel id's size.
+func (z Size) label(id int) string {
+	if id == pComms && z == sizeWide {
+		return "side"
+	}
+	return z.String()
+}
 
 func (z Size) String() string {
 	switch z {
@@ -45,14 +53,15 @@ func (z Size) String() string {
 }
 
 // ladder is the sizes panel id steps through. The orbit and comms are the
-// frame of the layout, so they never collapse; the orbit has no column, and the
-// comms grow upwards (column means taller) but never wider than the screen.
+// frame of the layout, so they never collapse; the orbit has no column. The
+// comms grow upwards (column means taller), then take the left side with every
+// other panel compact on the right (wide), then the screen.
 func ladder(id int) []Size {
 	switch id {
 	case pOrbit:
 		return []Size{sizeNormal, sizeWide, sizeFull}
 	case pComms:
-		return []Size{sizeNormal, sizeColumn, sizeFull}
+		return []Size{sizeNormal, sizeColumn, sizeWide, sizeFull}
 	}
 	return []Size{sizeMin, sizeNormal, sizeColumn, sizeWide, sizeFull}
 }

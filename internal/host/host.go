@@ -261,7 +261,7 @@ func serve(c *a2a.AgentCard, exec a2asrv.AgentExecutor) http.Handler {
 
 // meta is what Halo puts in message metadata under "halo".
 type meta struct {
-	Kind     string // "question" for ask_lead, "human_message" for a message from the person
+	Kind     string // "question" for ask_lead, "human_message" for a message from the person, "btw" for their aside question
 	Run      string // the run's root platform task
 	Subtask  string
 	Title    string

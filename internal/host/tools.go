@@ -224,7 +224,7 @@ func (h *Host) leadMCP() http.Handler {
 				}
 				return r.wait(ctx, in.TimeoutSeconds)
 			})
-		mcp.AddTool(s, &mcp.Tool{Name: "answer", Description: "Answer a worker's question (from a question event)."},
+		mcp.AddTool(s, &mcp.Tool{Name: "answer", Description: "Answer a worker's question (a question event) or the person's aside question (a btw event)."},
 			func(ctx context.Context, _ *mcp.CallToolRequest, in answerIn) (*mcp.CallToolResult, out, error) {
 				r, err := get()
 				if err != nil {
@@ -233,7 +233,7 @@ func (h *Host) leadMCP() http.Handler {
 				if !r.reply(in.QuestionID, in.Text) {
 					return nil, out{}, fmt.Errorf("no open question %s", in.QuestionID)
 				}
-				return ok("Sent to the worker.")
+				return ok("Sent.")
 			})
 		mcp.AddTool(s, &mcp.Tool{Name: "status", Description: "The plan with every subtask's status, worker, branch and latest note."},
 			func(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, out, error) {

@@ -111,6 +111,9 @@ type model struct {
 	deleteArm     string
 	deleteAt      time.Time
 	picker        *picker
+	runs          []RunInfo // your runs, listed beside the full-screen comms
+	runSel        int
+	pendingSize   Size // the comms size to keep once a run opened from the list loads
 	ctx           context.Context
 }
 
@@ -298,6 +301,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case m.picker != nil:
 			m.picker.runs, m.picker.loading = msg.runs, false
 		}
+		if msg.err == nil {
+			m.runs = msg.runs
+			m.runSel = min(m.runSel, max(0, len(m.runs)-1))
+		}
 	case historyMsg:
 		m.replay(msg)
 		return m, m.fetch()
@@ -479,12 +486,7 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if strings.HasPrefix(text, "/") {
 				return m, m.command(text)
 			}
-			text, images := m.expandImages(ExpandMentions(text, m.shortMap()))
-			m.st.Follow, m.st.Hint = true, ""
-			return m, func() tea.Msg {
-				_, err := m.o.Backend.Send(m.ctx, text, images)
-				return doneMsg{"prompt sent to " + m.st.Short(m.st.Lead), err}
-			}
+			return m, m.submit(text)
 		}
 		return m, m.typed(k)
 	case modeMessage:
@@ -595,6 +597,31 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 	}
+	if u.Focus == pComms && u.grown() == sizeFull {
+		// The runs beside the full-screen comms.
+		switch key {
+		case "[", "]":
+			d := 1
+			if key == "[" {
+				d = -1
+			}
+			m.runSel = max(0, min(len(m.runs)-1, m.runSel+d))
+			return m, nil
+		case "o":
+			if m.runSel < len(m.runs) {
+				r := m.runs[m.runSel]
+				if r.ID == m.st.Root {
+					m.say("that run is the one on screen")
+					return m, nil
+				}
+				size := u.Size[pComms]
+				cmd := m.resume(r)
+				m.pendingSize = size
+				return m, cmd
+			}
+			return m, nil
+		}
+	}
 	switch key {
 	case "q":
 		return m.quit()
@@ -602,11 +629,11 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 		u.Help, u.Query = true, ""
 	case "i", "p":
 		m.mode = modePrompt
-		return m, m.startInput(promptHint)
+		return m, m.startInput(m.promptHint())
 	case "/":
 		m.mode = modePrompt
 		m.setInput("/")
-		return m, m.startInput(promptHint)
+		return m, m.startInput(m.promptHint())
 	case "m":
 		if u.Focus == pPlan || u.Focus == pOrbit || u.Focus == pAgent {
 			return m, m.startMessage()
@@ -628,6 +655,9 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 		u.FocusNext(-1)
 	case "+", "=":
 		u.Grow()
+		if u.Focus == pComms && u.grown() == sizeFull {
+			return m, m.fetchRuns(false)
+		}
 	case "_", "-":
 		u.Shrink()
 	case "j", "down":
@@ -728,6 +758,62 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg { return doneMsg{"run canceled", m.o.Backend.Cancel(m.ctx, root)} }
 	}
 	return m, nil
+}
+
+// promptHint is the prompt's placeholder: what enter will do.
+func (m *model) promptHint() string {
+	if m.running() {
+		return "ask the lead anything on the side (btw), enter · /new starts another run"
+	}
+	return promptHint
+}
+
+// submit sends what was typed at the prompt. During a run it is a btw: the lead
+// answers it between its steps and no run starts. Otherwise it starts a run,
+// after a y/n when that replaces a run on screen.
+func (m *model) submit(text string) tea.Cmd {
+	if m.running() {
+		return m.btw(text)
+	}
+	if m.st.Root != "" {
+		return m.confirmRun(text)
+	}
+	return m.startRun(text)
+}
+
+// btw asks the lead text on the side of the run on screen.
+func (m *model) btw(text string) tea.Cmd {
+	if !m.running() {
+		m.say("no run to ask about · just send it as a prompt")
+		return nil
+	}
+	text, _ = m.expandImages(ExpandMentions(text, m.shortMap()))
+	ctx, b, root, who := m.ctx, m.o.Backend, m.st.Root, m.st.Short(m.st.Lead)
+	return func() tea.Msg {
+		return doneMsg{"btw sent to " + who + " · it answers when it can", b.Btw(ctx, root, text)}
+	}
+}
+
+// confirmRun asks before text starts a new run.
+func (m *model) confirmRun(text string) tea.Cmd {
+	q := "Start a new run with this prompt?"
+	what := "The lead plans it and the team builds it, next to the run on screen."
+	if !m.running() {
+		what = "The lead plans it in the same conversation, so it remembers this run."
+	}
+	m.confirm = &confirm{title: "NEW RUN", q: q, what: what, yes: func() tea.Cmd { return m.startRun(text) }}
+	return nil
+}
+
+// startRun sends text to the lead as a new run.
+func (m *model) startRun(text string) tea.Cmd {
+	text, images := m.expandImages(ExpandMentions(text, m.shortMap()))
+	m.st.Follow, m.st.Hint = true, ""
+	ctx, b, who := m.ctx, m.o.Backend, m.st.Short(m.st.Lead)
+	return func() tea.Msg {
+		_, err := b.Send(ctx, text, images)
+		return doneMsg{"prompt sent to " + who, err}
+	}
 }
 
 // confirm is a y/n dialog in front of an action.
@@ -858,7 +944,7 @@ func (m *model) open(n int) (tea.Model, tea.Cmd) {
 	if n == 0 && u.Focus != pAgent {
 		if m.st.Root == "" {
 			m.mode = modePrompt
-			return m, m.startInput(promptHint)
+			return m, m.startInput(m.promptHint())
 		}
 		return m, nil
 	}
@@ -895,7 +981,8 @@ func (m *model) render(now time.Time) string {
 		m.st.Preview = m.previewFor(pl.Branch)
 	}
 	sc := Screen{W: m.w, H: m.h, Frame: m.frame, Now: now, Server: m.o.Server, Connected: m.connected,
-		Online: m.online, Waiting: len(m.waits), Flash: m.flash, UI: m.ui, Team: "team here", Procs: m.o.Procs != nil}
+		Online: m.online, Waiting: len(m.waits), Flash: m.flash, UI: m.ui, Team: "team here", Procs: m.o.Procs != nil,
+		Runs: m.runs, RunSel: m.runSel}
 	if m.o.Team == nil {
 		sc.Team = "watch-only"
 	}

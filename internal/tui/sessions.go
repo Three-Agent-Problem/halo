@@ -13,6 +13,8 @@ import (
 
 // commands are the slash commands of the prompt.
 var commands = [][2]string{
+	{"/new", "start a new run with the rest of the line (asks first while one is on screen)"},
+	{"/btw", "ask the lead something on the side of the run; no new run"},
 	{"/clear", "start fresh: a new conversation with the lead"},
 	{"/resume", "reopen a past run and continue its conversation"},
 	{"/merge", "land the current run on your branch now"},
@@ -74,8 +76,24 @@ func (m *model) fetchRuns(startup bool) tea.Cmd {
 
 // command runs a slash command typed at the prompt.
 func (m *model) command(text string) tea.Cmd {
-	name, _, _ := strings.Cut(strings.TrimSpace(text), " ")
+	name, rest, _ := strings.Cut(strings.TrimSpace(text), " ")
+	rest = strings.TrimSpace(rest)
 	switch name {
+	case "/new":
+		if rest == "" {
+			m.say("/new needs a prompt: /new add a dark mode")
+			return nil
+		}
+		if m.st.Root != "" {
+			return m.confirmRun(rest)
+		}
+		return m.startRun(rest)
+	case "/btw":
+		if rest == "" {
+			m.say("/btw needs a question: /btw why sonnet for S2?")
+			return nil
+		}
+		return m.btw(rest)
 	case "/clear":
 		m.clear()
 		m.say("fresh start: the next prompt opens a new conversation with the lead")
@@ -169,6 +187,10 @@ func (m *model) replay(msg historyMsg) {
 	st.Pin, st.Follow = "", false
 	st.Packets, st.Dots = nil, nil
 	m.st, m.o.State, m.ui = st, st, NewUI()
+	if m.pendingSize > sizeNormal {
+		// Opened from the list beside the full-screen comms: stay there.
+		m.ui.Size[pComms], m.pendingSize = m.pendingSize, sizeNormal
+	}
 	m.o.Backend.Continue(msg.root)
 	if st.Root == "" {
 		m.say("that run has no history on this server")

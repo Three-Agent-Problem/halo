@@ -88,6 +88,8 @@ func (l *lead) Execute(ctx context.Context, ec *a2asrv.ExecutorContext) iter.Seq
 		return l.question(ctx, ec, m)
 	case "human_message":
 		return l.humanMessage(ctx, ec, m)
+	case "btw":
+		return l.btw(ctx, ec, m)
 	case "stop_subtask":
 		return l.stopSubtask(ctx, ec, m)
 	}
@@ -221,9 +223,46 @@ func (l *lead) question(ctx context.Context, ec *a2asrv.ExecutorContext, m meta)
 	}
 }
 
+// btw is the person's aside question during a run, like Claude Code's /btw: it
+// neither starts a run nor changes the plan. The task stays open until the lead
+// answers it with the answer tool between its other steps, and completes with
+// the answer.
+func (l *lead) btw(ctx context.Context, ec *a2asrv.ExecutorContext, m meta) iter.Seq2[a2a.Event, error] {
+	return func(yield func(a2a.Event, error) bool) {
+		r := l.run(m.Run)
+		if r == nil {
+			if runs := l.active(); len(runs) > 0 {
+				r = runs[0]
+			}
+		}
+		if r == nil {
+			msg := a2a.NewMessageForTask(a2a.MessageRoleAgent, ec, a2a.NewTextPart("There is no active run to ask about: send it as a prompt instead."))
+			yield(a2a.NewStatusUpdateEvent(ec, a2a.TaskStateFailed, msg), nil)
+			return
+		}
+		if !yield(a2a.NewSubmittedTask(ec, ec.Message), nil) {
+			return
+		}
+		from := strings.TrimPrefix(nonEmpty(m.From, l.h.st.Human, "human"), "@")
+		q := r.aside(from, textOf(ec.Message))
+		var ans string
+		select {
+		case ans = <-q.answer:
+		case <-ctx.Done():
+			r.forget(q.id)
+			return
+		case <-time.After(30 * time.Minute):
+			r.forget(q.id)
+			ans = "The lead didn't get to this in time."
+		}
+		msg := a2a.NewMessageForTask(a2a.MessageRoleAgent, ec, a2a.NewTextPart(ans))
+		yield(a2a.NewStatusUpdateEvent(ec, a2a.TaskStateCompleted, msg), nil)
+	}
+}
+
 // event is something wait_events hands the lead.
 type event struct {
-	// question, human, human_message (the person messaged an agent during the run),
+	// question, human, human_message (the person messaged an agent during the run), btw,
 	// subtask_done, subtask_failed, review, conflict, merged
 	Kind     string `json:"kind"`
 	ID       string `json:"id,omitempty"`
@@ -353,6 +392,18 @@ func (r *run) ask(from, subtask, text string) *question {
 	})
 	r.push(event{Kind: "question", ID: q.id, Subtask: subtask, From: "@" + from, Text: text,
 		Hint: "answer it with answer(question_id, text)"})
+	return q
+}
+
+// aside opens the person's btw question; the lead answers it like a worker's.
+func (r *run) aside(from, text string) *question {
+	r.mu.Lock()
+	r.qseq++
+	q := &question{id: fmt.Sprintf("Q%d", r.qseq), from: from, text: text, answer: make(chan string, 1)}
+	r.questions[q.id] = q
+	r.mu.Unlock()
+	r.push(event{Kind: "btw", ID: q.id, From: "@" + from, Text: text,
+		Hint: "an aside question from the person: answer it with answer(question_id, text) at your next chance, briefly, and carry on with the run. Change the plan only if it asks you to"})
 	return q
 }
 

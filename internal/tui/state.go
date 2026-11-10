@@ -145,6 +145,7 @@ type State struct {
 	ReportNew bool
 	planArt   string
 	Follow    bool
+	btws      map[string]string // btw task → its last state
 	// Hosted is set when this Halo hosts the team: the agents' raw output comes
 	// through Feed, so the activity log's copy of it is skipped.
 	Hosted     bool
@@ -252,6 +253,10 @@ func (s *State) Apply(e lg.Entry, now time.Time) {
 		s.usageFromLog(e) // the roster counts every run
 		return
 	}
+	if e.Kind == "task" && isBtw(e) {
+		s.btw(e, now, live)
+		return
+	}
 	if e.Kind == "task" && e.TaskID != "" && e.ParentTaskID == "" && e.Sender == s.Human && e.Recipient == s.Lead &&
 		s.Tasks[e.TaskID] == nil && (s.Root == "" || s.Follow) && (s.Pin == "" || s.Pin == e.TaskID) {
 		s.startRun(e, now)
@@ -289,6 +294,53 @@ func (s *State) Apply(e lg.Entry, now time.Time) {
 			s.packet(e.Sender, e.Recipient, kind, "?", now)
 			s.packet(e.Recipient, e.Sender, "reply", "↳", now.Add(PacketTime))
 		}
+	}
+}
+
+// isBtw reports whether a task entry is a btw: the person's aside question to
+// the lead during a run.
+func isBtw(e lg.Entry) bool {
+	t, _ := e.Data["tags"].(map[string]any)
+	return t[BtwTag] != nil
+}
+
+// btw shows the person's aside question and, later, the lead's answer in the
+// comms of the run it belongs to. It is never a run of its own. The entry's
+// sender may be the lead (Halo sends it with the lead's token), so the lines
+// name the person and the lead themselves.
+func (s *State) btw(e lg.Entry, now time.Time, live bool) {
+	run := e.ParentTaskID
+	if t, _ := e.Data["tags"].(map[string]any); run == "" && t != nil {
+		run, _ = t["run"].(string)
+	}
+	if s.Root == "" || run != s.Root {
+		return
+	}
+	if s.btws == nil {
+		s.btws = map[string]string{}
+	}
+	text := nonEmpty(e.Str("content"), e.Summary)
+	prev, seen := s.btws[e.TaskID]
+	if seen && prev == e.State {
+		return
+	}
+	s.btws[e.TaskID] = e.State
+	s.Events++
+	s.evTimes = append(s.evTimes, now)
+	s.raw(e)
+	switch {
+	case !seen && !terminal(e.State):
+		s.comm(now, "ask", s.Human, s.Lead, "btw · "+text, "")
+		if live {
+			s.packet(s.Human, s.Lead, "ask", "BTW", now)
+		}
+	case e.State == stCompleted:
+		s.comm(now, "reply", s.Lead, s.Human, "btw · "+text, "")
+		if live {
+			s.packet(s.Lead, s.Human, "reply", "↳", now)
+		}
+	case terminal(e.State):
+		s.comm(now, "fail", s.Lead, s.Human, "btw · "+nonEmpty(text, "the lead couldn't take it"), "")
 	}
 }
 

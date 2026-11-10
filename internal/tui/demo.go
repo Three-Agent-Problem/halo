@@ -36,8 +36,12 @@ type Demo struct {
 	shells  []Shell
 	outs    map[string]string
 	pid     int
-	msgs    int // fake human messages sent
+	msgs    int        // fake human messages sent
+	history []lg.Entry // what was emitted, for Runs and History
 }
+
+// demoHistory caps the entries the demo keeps for Runs and History.
+const demoHistory = 20000
 
 type demoTask struct{ parent, from, to string }
 
@@ -88,10 +92,57 @@ func (d *Demo) Cancel(context.Context, string) error { return nil }
 func (d *Demo) Online(_ context.Context, handles []string) ([]string, error) { return handles, nil }
 
 // Runs implements Backend: the demo keeps no history.
-func (d *Demo) Runs(context.Context) ([]RunInfo, error) { return nil, nil }
+func (d *Demo) Runs(context.Context) ([]RunInfo, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return runsOf(d.history, d.Human, d.h("lead")), nil
+}
 
 // History implements Backend.
-func (d *Demo) History(context.Context) ([]lg.Entry, error) { return nil, nil }
+func (d *Demo) History(context.Context) ([]lg.Entry, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return append([]lg.Entry(nil), d.history...), nil
+}
+
+// runsOf lists the runs in an activity log, newest first: the person's root
+// tasks to the lead, with their latest state and how many tasks they grew.
+func runsOf(es []lg.Entry, human, lead string) []RunInfo {
+	byID := map[string]*RunInfo{}
+	var order []string
+	parent := map[string]string{}
+	for _, e := range es {
+		if e.Kind != "task" || e.TaskID == "" {
+			continue
+		}
+		if e.ParentTaskID == "" && e.Sender == human && e.Recipient == lead && !isBtw(e) {
+			r := byID[e.TaskID]
+			if r == nil {
+				r = &RunInfo{ID: e.TaskID, Title: e.Summary, Started: e.At}
+				byID[e.TaskID] = r
+				order = append(order, e.TaskID)
+			}
+			r.State, r.Updated = e.State, e.At
+			continue
+		}
+		if _, ok := parent[e.TaskID]; !ok && e.ParentTaskID != "" {
+			parent[e.TaskID] = e.ParentTaskID
+			root := e.ParentTaskID
+			for parent[root] != "" {
+				root = parent[root]
+			}
+			if r := byID[root]; r != nil {
+				r.Tasks++
+				r.Updated = e.At
+			}
+		}
+	}
+	out := make([]RunInfo, 0, len(order))
+	for i := len(order) - 1; i >= 0; i-- {
+		out = append(out, *byID[order[i]])
+	}
+	return out
+}
 
 // Continue implements Backend.
 func (d *Demo) Continue(string) {}
@@ -120,6 +171,35 @@ func (d *Demo) Message(_ context.Context, to, subtask, text string, direct bool)
 	}
 	d.task(id, "", d.Human, d.h("lead"), strings.TrimSpace(fmt.Sprintf("message to @%s %s (%s): %s", to, subtask, how, text)))
 	d.state(id, "TASK_STATE_COMPLETED", "Sent.")
+	return nil
+}
+
+// Btw implements Backend: a fake btw task that the lead answers a few seconds
+// later.
+func (d *Demo) Btw(ctx context.Context, root, text string) error {
+	if strings.TrimSpace(text) == "" {
+		return fmt.Errorf("the question is empty")
+	}
+	d.mu.Lock()
+	ready := d.emit != nil
+	d.msgs++
+	id := fmt.Sprintf("demo-btw-%d", d.msgs)
+	if ready {
+		d.tasks[id] = demoTask{root, d.Human, d.h("lead")}
+	}
+	d.mu.Unlock()
+	if !ready {
+		return nil
+	}
+	tags := map[string]any{"tags": map[string]any{"run": root, BtwTag: "1"}}
+	// Off the caller's goroutine, like a real server's stream.
+	go func() {
+		d.send(lg.Entry{Kind: "task", TaskID: id, ParentTaskID: root, Sender: d.Human, Recipient: d.h("lead"), State: "TASK_STATE_SUBMITTED", Summary: text, Data: tags})
+		sleep(context.WithoutCancel(ctx), 3*time.Second)
+		d.send(lg.Entry{Kind: "task", TaskID: id, ParentTaskID: root, Sender: d.Human, Recipient: d.h("lead"), State: "TASK_STATE_COMPLETED",
+			Summary: "(demo) The lead answers asides between its steps, without touching the plan. A real lead would answer “" + firstLine(text) + "” here.",
+			Data:    tags})
+	}()
 	return nil
 }
 
@@ -196,6 +276,10 @@ func (d *Demo) send(e lg.Entry) {
 	d.mu.Lock()
 	d.seq++
 	e.Seq, e.At = d.seq+1180, time.Now()
+	d.history = append(d.history, e)
+	if len(d.history) > demoHistory {
+		d.history = append([]lg.Entry(nil), d.history[len(d.history)-demoHistory/2:]...)
+	}
 	emit := d.emit
 	d.mu.Unlock()
 	emit(e)

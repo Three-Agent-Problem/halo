@@ -105,7 +105,7 @@ It works like lazygit: every panel has a number, and `enter` opens the selected 
 | `1` plan | Subtasks, models, progress, and what each running worker is doing now. Grown: a kanban. Full size: a timeline per agent. | The subtask: status, attempts, commits and every message about it. |
 | `2` orbit | Every message travelling through Lagrange. | (grows it) |
 | `3` agent | The agent's raw Claude Code output: thinking, messages and tool calls with their output. `v` switches to the tool calls Lagrange saw, and `h`/`l` switch agents. | A tool call's full input and output. |
-| `4` comms | Agent ⇄ agent messages. `f` filters by agent. | The whole message. |
+| `4` comms | Agent ⇄ agent messages. `f` filters by agent. `+` makes it taller, then gives it the left side with every other panel compact on the right (you keep talking while the run stays in view), then the full screen with your past runs beside it: `[` `]` pick one, `o` opens it. | The whole message. |
 | `5` commits | The run's commits as a live branch graph. | The diff (`[` `]` previous/next). |
 | `6` events | The raw Lagrange activity feed. | The entry as JSON. |
 | `7` roster | The team, with each agent's cost and context fill. `n` adds an agent, `m` changes its model, `d d` removes it and `R` restarts it. | (watches that agent in `3`) |
@@ -117,9 +117,9 @@ It works like lazygit: every panel has a number, and `enter` opens the selected 
 | `+` / `-` | Grow or shrink it: bar → normal → column → wide → full. |
 | `j` `k` `g` `G` `ctrl+d` `ctrl+u` | Move and scroll. |
 | `enter` / `esc` | Open / go back. |
-| `i` | Prompt the lead. |
+| `i` | Prompt the lead. During a run, what you send is a **btw**: a side question the lead answers between its steps, with no new run and no change to the plan. A prompt that would start a new run asks y/n first, and `/new <prompt>` starts one on purpose. |
 | `a` | Answer what is waiting on you: `y` approves, `n` rejects, `r` replies. The lead's multiple-choice questions open as a form. |
-| `/` | Commands: `/clear` starts fresh, `/resume` reopens a past run, `/merge` lands the run now, `/summary` shows the run summary, `/connections` connects Telegram, plus `/agents` and `/help`. |
+| `/` | Commands: `/new` starts a run, `/btw` asks on the side, `/clear` starts fresh, `/resume` reopens a past run, `/merge` lands the run now, `/summary` shows the run summary, `/connections` connects Telegram, plus `/agents` and `/help`. |
 | `ctrl+v` | While typing: paste a screenshot from the clipboard, or drag in an image file. |
 | `x` | In the plan or agent panel: stop that subtask's worker (asks y/n first). Elsewhere, `x` `x` cancels the run. |
 | `?` | Every key. Type to search. |

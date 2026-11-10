@@ -16,6 +16,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/three-agent-problem/lagrange/client"
 	"github.com/three-agent-problem/lagrange/code"
+	"github.com/three-agent-problem/lagrange/delegate"
 
 	"github.com/three-agent-problem/halo/internal/lg"
 	"github.com/three-agent-problem/lagrange/ask"
@@ -62,6 +63,10 @@ type Backend interface {
 	// current one). direct sends it straight to the worker, in its session;
 	// otherwise the lead relays it. It fails when there is no such run or subtask.
 	Message(ctx context.Context, to, subtask, text string, direct bool) error
+	// Btw asks the lead something on the side of run root, like Claude Code's
+	// /btw: it starts no run and changes no plan. The lead answers when it can;
+	// the answer arrives as the btw task completing.
+	Btw(ctx context.Context, root, text string) error
 	// StopSubtask stops the worker of a running subtask: its task is canceled and the
 	// lead hears it was on purpose. It fails when the subtask isn't running.
 	StopSubtask(ctx context.Context, subtask string) error
@@ -315,6 +320,33 @@ func (l *Live) Message(ctx context.Context, to, subtask, text string, direct boo
 	}
 	return l.toLead(ctx, text, meta)
 }
+
+// Btw implements Backend. The task nests under the run (Lagrange-Task) and is
+// tagged btw, so every client shows it in the run instead of as a new one.
+func (l *Live) Btw(ctx context.Context, root, text string) error {
+	if strings.TrimSpace(text) == "" {
+		return errors.New("the question is empty")
+	}
+	tok := l.Key
+	if l.Token != nil {
+		tok = cmp.Or(l.Token(), l.Key)
+	}
+	meta := map[string]any{
+		"halo":           map[string]any{"kind": "btw", "run": root, "from": l.Human},
+		delegate.TagsKey: map[string]any{"run": root, BtwTag: "1"},
+	}
+	res, err := lg.Caller{Server: l.Server, Token: tok}.Send(ctx, lg.Call{To: l.Lead, Parent: root, Text: text, Meta: meta, Immediate: true})
+	if err != nil {
+		return err
+	}
+	if t, ok := res.(*a2a.Task); ok && t.Status.State == a2a.TaskStateFailed {
+		return errors.New(cmp.Or(lg.TaskText(t), "the lead couldn't take the question"))
+	}
+	return nil
+}
+
+// BtwTag marks a btw task in the activity log's tags.
+const BtwTag = "btw"
 
 // StopSubtask implements Backend, with Halo's stop_subtask metadata, which the hosting
 // Halo handles like a human_message.

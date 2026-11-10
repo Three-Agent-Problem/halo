@@ -34,10 +34,19 @@ type Screen struct {
 	BottomTag string
 	Flash     string
 	UI        *UI
-	Team      string   // "team here" or "watch-only"
-	Procs     bool     // this Halo can see the agents' shells
-	Overlay   []string // a box drawn in the middle (the /resume list)
+	Team      string    // "team here" or "watch-only"
+	Procs     bool      // this Halo can see the agents' shells
+	Overlay   []string  // a box drawn in the middle (the /resume list)
+	Runs      []RunInfo // your runs with the lead, for the full-screen comms
+	RunSel    int       // the run selected in that list
 }
+
+// runsW is the width of the runs list beside the full-screen comms, and
+// sideMin the narrowest the comms may be at side size.
+const (
+	runsW   = 46
+	sideMin = 70
+)
 
 // Render draws the whole screen.
 func (s *State) Render(sc Screen) string {
@@ -52,7 +61,12 @@ func (s *State) Render(sc Screen) string {
 	bodyH := sc.H - 1 - len(foot)
 	var body []string
 	if u.grown() == sizeFull {
-		body = append([]string{s.tabs(sc.W, sc)}, strings.Split(s.paneBox(u.Focus, sc.W, bodyH-1, sc), "\n")...)
+		pane := s.paneBox(u.Focus, sc.W, bodyH-1, sc)
+		if u.Focus == pComms && sc.W >= runsW+sideMin {
+			// Past conversations beside the comms, to open without /resume.
+			pane = lipgloss.JoinHorizontal(lipgloss.Top, s.paneBox(pComms, sc.W-runsW, bodyH-1, sc), s.runsBox(runsW, bodyH-1, sc))
+		}
+		body = append([]string{s.tabs(sc.W, sc)}, strings.Split(pane, "\n")...)
 	} else {
 		body = s.normal(sc.W, bodyH, sc)
 	}
@@ -86,8 +100,15 @@ func (s *State) normal(w, h int, sc Screen) []string {
 	u := sc.UI
 	g := u.grown()
 	ch := commsH
-	if u.Focus == pComms && g == sizeColumn {
+	if u.Focus == pComms && g >= sizeColumn {
 		ch = max(commsH, h/2)
+		if g == sizeWide && w >= minWide {
+			// The left side, full height; every other panel compact beside it, so
+			// the run stays in view while you talk.
+			cw := max(sideMin, w*11/20)
+			rest := s.column([]int{pPlan, pAgent, pCommits, pRoster, pShells}, pAgent, w-cw, h, sc)
+			return strings.Split(lipgloss.JoinHorizontal(lipgloss.Top, s.paneBox(pComms, cw, h, sc), rest), "\n")
+		}
 	}
 	midH := h - ch
 	var mid []string
@@ -322,13 +343,41 @@ func (s *State) tabs(w int, sc Screen) string {
 		}
 		b.WriteString(" ")
 	}
-	right := c("dim", u.Size[u.Focus].String()+" · ") + c("mute!", "+") + c("dim", " grow  ") + c("mute!", "_") + c("dim", " shrink  ") + c("mute!", "?") + c("dim", " keys ")
+	right := c("dim", u.Size[u.Focus].label(u.Focus)+" · ") + c("mute!", "+") + c("dim", " grow  ") + c("mute!", "_") + c("dim", " shrink  ") + c("mute!", "?") + c("dim", " keys ")
 	left := b.String()
 	gap := w - ansi.StringWidth(left) - ansi.StringWidth(right)
 	if gap < 1 {
 		return fit(left, w)
 	}
 	return left + strings.Repeat(" ", gap) + right
+}
+
+// runsBox lists your runs with the lead beside the full-screen comms: [ and ]
+// pick one, o opens it here (like /resume).
+func (s *State) runsBox(w, h int, sc Screen) string {
+	inner := w - 4
+	lines := []string{}
+	if len(sc.Runs) == 0 {
+		lines = append(lines, c("dim", "no runs yet"))
+	}
+	sel := max(0, min(sc.RunSel, len(sc.Runs)-1))
+	// Keep the selection in view: two lines per run.
+	first := max(0, sel-(h-4)/2+1)
+	for i := first; i < len(sc.Runs) && len(lines)+2 <= h-2; i++ {
+		r := sc.Runs[i]
+		state := strings.ReplaceAll(strings.ToLower(strings.TrimPrefix(r.State, "TASK_STATE_")), "_", "-")
+		mark, title := "  ", "fg"
+		if i == sel {
+			mark, title = c("hub!", "▌ "), "hi!"
+		}
+		if r.ID == s.Root {
+			state = "on screen"
+		}
+		lines = append(lines,
+			mark+c(title, fit(firstLine(r.Title), inner-2)),
+			"  "+c("hub", RunShort(r.ID))+" "+c(nonEmpty(runStateKey[state], "dim"), state)+c("dim", fmt.Sprintf(" · %d tasks · %s", r.Tasks, ago(sc.Now.Sub(r.Updated)))))
+	}
+	return box(w, h, c("hi!", "RUNS"), c("dim", "[ ] pick · o open"), lines, false)
 }
 
 func (s *State) header(sc Screen) string {

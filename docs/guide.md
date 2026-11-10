@@ -170,7 +170,9 @@ When every subtask has been reviewed and merged into `halo/<run>`, Halo merges t
 
 The **run summary** opens on top: what each subtask built, wall time, review rounds, escalations and cost. `c` copies it as Markdown, `esc` closes it, and `/summary` brings it back.
 
-Then press `i` for the next prompt. It continues the same conversation, so the lead remembers this run. `/clear` starts fresh, and `/resume` reopens any past run.
+Then press `i` for the next prompt. It asks y/n before starting the new run, which continues the same conversation, so the lead remembers this run. `/clear` starts fresh, and `/resume` reopens any past run; so does `o` in the runs list beside the full-screen comms (`4`, then `+` three times).
+
+While a run works, `i` asks the lead a **btw**: a side question it answers between its steps, without a new run or a change to the plan. The answer lands in comms. `/new <prompt>` starts another run instead, after a y/n.
 
 ## Optional · Answer from your phone (Telegram)
 

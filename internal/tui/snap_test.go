@@ -340,8 +340,9 @@ func TestSnapshot(t *testing.T) {
 			m.ui.Help, m.ui.Query = true, q
 			continue
 		}
-		// /command runs a slash command; paste:<text> pastes; enter, with a dialog
-		// open, goes to it; sleep:N waits N seconds (unlocked).
+		// /command runs a slash command; paste:<text> pastes; send is enter at the
+		// prompt; enter, with a dialog open, goes to it; sleep:N waits N seconds
+		// (unlocked).
 		run := func(cmd tea.Cmd) {
 			if cmd == nil {
 				return
@@ -363,11 +364,18 @@ func TestSnapshot(t *testing.T) {
 			time.Sleep(time.Duration(n) * time.Second)
 			mu.Lock()
 			continue
+		case k == "send":
+			// enter at the prompt: sends what was typed or pasted.
+			_, cmd := m.key(tea.KeyPressMsg{Code: tea.KeyEnter})
+			run(cmd)
+			continue
 		case m.conn != nil && k == "enter":
 			run(m.connKey(tea.KeyPressMsg{Code: tea.KeyEnter}))
 			continue
 		}
-		m.normalKey(k)
+		if _, cmd := m.normalKey(k); cmd != nil && k == "+" && m.ui.Focus == pComms {
+			run(cmd) // the runs beside the full-screen comms
+		}
 	}
 	out := toHTML(m.render(time.Now()))
 	if strings.HasSuffix(path, ".txt") {
