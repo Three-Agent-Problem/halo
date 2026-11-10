@@ -183,14 +183,37 @@ func Run(ctx context.Context, cfg *config.Config, st *config.State, notify func(
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := tunnel.Run(ctx, tunnel.ClientConfig{Server: st.Server, Token: st.Token(handle), Capacity: a.Capacity,
-				Handler: handler, UserAgent: "halo", Logger: h.log,
-				OnConnect: func() { notify(Event{Kind: "online", Agent: handle, Text: a.Model + " " + a.Role}) }})
+			run := func() error {
+				return tunnel.Run(ctx, tunnel.ClientConfig{Server: st.Server, Token: st.Token(handle), Capacity: a.Capacity,
+					Handler: handler, UserAgent: "halo", Logger: h.log,
+					OnConnect: func() { notify(Event{Kind: "online", Agent: handle, Text: a.Model + " " + a.Role}) }})
+			}
+			err := run()
+			// A saved token stops working when the server's database is reset or the
+			// token is revoked: mint a new one and connect again, once.
+			if errors.Is(err, tunnel.ErrUnauthorized) {
+				err = h.remint(ctx, handle)
+				if err == nil {
+					err = run()
+				}
+			}
 			if err != nil && !errors.Is(err, context.Canceled) {
 				errs <- fmt.Errorf("@%s: %w", handle, err)
 				cancel()
 			}
 		}()
+	}
+	// A failed tunnel cancels ctx, so an agent still starting fails with "context
+	// canceled"; report the tunnel's error instead, which says what went wrong.
+	cause := func(err error) error {
+		if ctx.Err() != nil {
+			select {
+			case tunnelErr := <-errs:
+				return tunnelErr
+			default:
+			}
+		}
+		return err
 	}
 	notify(Event{Kind: "start", Text: fmt.Sprintf("halo agents · %s · repo %s\n  worktrees and logs: %s", st.Server, cfg.Repo, wt.root)})
 	for _, a := range cfg.Agents {
@@ -199,7 +222,7 @@ func Run(ctx context.Context, cfg *config.Config, st *config.State, notify func(
 		}
 		w, err := h.newWorker(ctx, a, logFile)
 		if err != nil {
-			return err
+			return cause(err)
 		}
 		defer w.exec.Close()
 		h.workers[w.handle] = w
@@ -207,7 +230,7 @@ func Run(ctx context.Context, cfg *config.Config, st *config.State, notify func(
 	}
 	l, err := h.newLead(ctx, cfg.Lead(), logFile)
 	if err != nil {
-		return err
+		return cause(err)
 	}
 	defer l.exec.Close()
 	h.lead = l
@@ -221,6 +244,17 @@ func Run(ctx context.Context, cfg *config.Config, st *config.State, notify func(
 	default:
 		return nil
 	}
+}
+
+// remint replaces handle's rejected token with a new one and saves it.
+func (h *Host) remint(ctx context.Context, handle string) error {
+	tok, err := h.api.MintToken(ctx, handle, "halo")
+	if err != nil {
+		return fmt.Errorf("the server rejected the saved token and minting a new one failed: %w", err)
+	}
+	h.st.SetToken(handle, tok)
+	h.log.Info("minted a new token after the server rejected the saved one", "address", handle)
+	return h.st.Save()
 }
 
 func (h *Host) handle(a config.Agent) string { return h.cfg.Handle(a.Name) }

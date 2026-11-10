@@ -108,8 +108,8 @@ type setup struct {
 
 	// How things were when setup opened, for a section's revert.
 	origRoster *config.Config
-	origState  config.State
-	revertAsk  int // the section a y/n revert question is about, or -1
+	origState  struct{ Server, Key, Human string } // the server section as setup opened it
+	revertAsk  int                                 // the section a y/n revert question is about, or -1
 }
 
 type (
@@ -127,7 +127,7 @@ func newSetup(ctx context.Context, o SetupOptions) *setup {
 	}
 	s := &setup{ctx: ctx, o: o, url: o.State.Server, key: o.State.Key, found: map[string]string{}}
 	s.serverOK = o.State.Server != "" && o.State.Key != "" && o.State.Human != ""
-	s.origRoster, s.origState, s.revertAsk = cloneRoster(o.Roster), *o.State, -1
+	s.origRoster, s.origState, s.revertAsk = cloneRoster(o.Roster), struct{ Server, Key, Human string }{o.State.Server, o.State.Key, o.State.Human}, -1
 	for _, a := range codingAgents {
 		if p, err := o.LookPath(a.Bin); err == nil {
 			s.found[a.Bin] = p

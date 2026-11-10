@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
@@ -206,6 +207,8 @@ type State struct {
 	Key    string            `json:"key"`
 	Human  string            `json:"human"`
 	Tokens map[string]string `json:"tokens,omitempty"` // "server handle" -> token
+
+	mu sync.Mutex // guards Tokens: agents re-mint theirs while others read
 }
 
 // StatePath is $HALO_STATE or halo/state.json in the user's config directory.
@@ -256,7 +259,9 @@ func (s *State) Save() error {
 	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 		return err
 	}
+	s.mu.Lock()
 	raw, _ := json.MarshalIndent(s, "", "  ")
+	s.mu.Unlock()
 	tmp := p + ".tmp"
 	if err := os.WriteFile(tmp, raw, 0o600); err != nil {
 		return err
@@ -265,10 +270,16 @@ func (s *State) Save() error {
 }
 
 // Token returns the saved token of a handle on the current server.
-func (s *State) Token(handle string) string { return s.Tokens[s.Server+" "+handle] }
+func (s *State) Token(handle string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Tokens[s.Server+" "+handle]
+}
 
 // SetToken saves a token.
 func (s *State) SetToken(handle, token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.Tokens == nil {
 		s.Tokens = map[string]string{}
 	}
