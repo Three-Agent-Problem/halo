@@ -23,6 +23,7 @@ type Connector interface {
 	PairTelegram(ctx context.Context) (*client.Telegram, error)
 	SetTelegramLevel(ctx context.Context, level string) (*client.Telegram, error)
 	TestTelegram(ctx context.Context) error
+	DisconnectTelegram(ctx context.Context) error
 }
 
 // Telegram implements Connector.
@@ -43,6 +44,11 @@ func (l *Live) PairTelegram(ctx context.Context) (*client.Telegram, error) {
 // SetTelegramLevel implements Connector.
 func (l *Live) SetTelegramLevel(ctx context.Context, level string) (*client.Telegram, error) {
 	return l.client().SetTelegramLevel(ctx, level)
+}
+
+// DisconnectTelegram implements Connector.
+func (l *Live) DisconnectTelegram(ctx context.Context) error {
+	return l.client().DisconnectTelegram(ctx)
 }
 
 // TestTelegram implements Connector.
@@ -99,6 +105,14 @@ func (d *Demo) SetTelegramLevel(_ context.Context, level string) (*client.Telegr
 // TestTelegram implements Connector.
 func (d *Demo) TestTelegram(context.Context) error { return nil }
 
+// DisconnectTelegram implements Connector.
+func (d *Demo) DisconnectTelegram(context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	demoTG.st, demoTG.linkAt = client.Telegram{}, time.Time{}
+	return nil
+}
+
 // connWizard is the /connections dialog.
 type connWizard struct {
 	st    *client.Telegram
@@ -107,6 +121,7 @@ type connWizard struct {
 	busy  bool
 	err   string
 	note  string
+	armed bool // d was pressed once: d again disconnects
 }
 
 type (
@@ -201,9 +216,23 @@ func (m *model) connKey(k tea.KeyPressMsg) tea.Cmd {
 		return nil
 	}
 	w.err, w.note = "", ""
+	armed := w.armed
+	w.armed = false
 	switch {
 	case w.st == nil:
 		return nil
+	case w.st.Connected && key == "d":
+		if !armed {
+			w.armed, w.note = true, "press d again to disconnect @"+w.st.BotUsername+" (it forgets the token and your chat)"
+			return nil
+		}
+		w.busy, w.link = true, ""
+		return m.tgDo(func(ctx context.Context, c Connector) (*client.Telegram, error) {
+			if err := c.DisconnectTelegram(ctx); err != nil {
+				return nil, err
+			}
+			return c.Telegram(ctx)
+		}, "disconnected: paste a token to connect a bot again", false)
 	case !w.st.Connected:
 		switch key {
 		case "enter":
@@ -303,7 +332,7 @@ func (m *model) connBox(w int) []string {
 			lines = append(lines, "", "  "+c("mute", "scan it with your phone, or open ")+c("task", cw.link),
 				"  "+c("mute", "the link works once, for 10 minutes · waiting for you to tap Start ")+c("hub", spinner(m.frame)))
 		}
-		lines = append(lines, "", "  "+key("p", "new link")+key("esc", "close"))
+		lines = append(lines, "", "  "+key("p", "new link")+key("d d", "disconnect")+key("esc", "close"))
 	default:
 		level := "questions, plus runs' news and when they finish"
 		if st.Level == "questions" {
@@ -317,7 +346,7 @@ func (m *model) connBox(w int) []string {
 		if cw.link != "" {
 			lines = append(lines, "", "  "+c("mute", "to pair another chat, open ")+c("task", cw.link))
 		}
-		lines = append(lines, "", "  "+key("t", "send a test")+key("l", "switch what it sends")+key("p", "pair another chat")+key("esc", "close"))
+		lines = append(lines, "", "  "+key("t", "send a test")+key("l", "switch what it sends")+key("p", "pair another chat")+key("d d", "disconnect")+key("esc", "close"))
 	}
 	if cw.err != "" {
 		lines = append(lines, "")

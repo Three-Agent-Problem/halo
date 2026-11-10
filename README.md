@@ -142,7 +142,7 @@ Step away and keep the run moving: `/connections` in the TUI (or `halo connectio
 
 1. In Telegram, open @BotFather, send `/newbot`, and paste the token it gives you.
 2. Scan the QR code (or open the link) and tap **Start**. That pairs the bot with your chat. The link works once, for 10 minutes.
-3. Halo sends a test message. `l` switches between *only questions* and *questions plus runs' news and summaries*.
+3. Halo sends a test message. `l` switches between *only questions* and *questions plus runs' news and summaries*. `d` `d` disconnects the bot, to start over.
 
 What reaches Telegram: the lead's questions as option buttons, the plan approval as Approve/Reject (Approve asks again), reminders and escalations, notices from the run report, and the run summary when it ends. When you answer in the TUI or the inbox, the Telegram message updates itself.
 
@@ -164,7 +164,7 @@ What reaches Telegram: the lead's questions as option buttons, the plan approval
 | `halo init --server URL --key lgk_…` | Save the server and key, and create the addresses, without opening the TUI. |
 | `halo agents` | Run the team headless. |
 | `halo merge [run] [--keep]` | List finished runs, or merge one into the checked-out branch, then print its summary. |
-| `halo connections [--level questions\|milestones] [--pair] [--test]` | Connect Telegram in the terminal (token hidden, QR code to pair). |
+| `halo connections [--level questions\|milestones] [--pair] [--test] [--disconnect]` | Connect Telegram in the terminal (token hidden, QR code to pair); `--disconnect` starts over. |
 | `halo version` | The installed version. |
 
 ## Built on

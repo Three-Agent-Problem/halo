@@ -26,6 +26,7 @@ func connectionsCmd(ctx context.Context, args []string) error {
 	level := fs.String("level", "", "What the bot sends besides questions: questions or milestones.")
 	pair := fs.Bool("pair", false, "Make a new pairing link (pair another chat).")
 	test := fs.Bool("test", false, "Send a test message.")
+	disconnect := fs.Bool("disconnect", false, "Disconnect the bot (forget its token and chat), to start over.")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -37,6 +38,13 @@ func connectionsCmd(ctx context.Context, args []string) error {
 		return errors.New("no Lagrange server yet: run halo (or halo init --server URL --key lgk_…) first")
 	}
 	c := client.New(st.Server, st.Key)
+	if *disconnect {
+		if err := c.DisconnectTelegram(ctx); err != nil {
+			return err
+		}
+		fmt.Println("✓ disconnected: run halo connections to connect a bot again")
+		return nil
+	}
 	tg, err := c.Telegram(ctx)
 	if err != nil {
 		return fmt.Errorf("reading the connection from %s: %w", st.Server, err)
@@ -110,7 +118,7 @@ stop or message anything, and typed text goes nowhere.
 		what = "only questions for you"
 	}
 	fmt.Printf("@%s talks to @%s and sends %s.\n", tg.BotUsername, nonEmptyStr(tg.ChatUsername, "you"), what)
-	fmt.Println("Change it with --level questions|milestones, pair another chat with --pair, or in Lagrange → Settings → Telegram.")
+	fmt.Println("Change it with --level questions|milestones, pair another chat with --pair, start over with --disconnect, or in Lagrange → Settings → Telegram.")
 	return nil
 }
 

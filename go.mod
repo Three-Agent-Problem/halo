@@ -11,7 +11,7 @@ require (
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/google/jsonschema-go v0.4.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/three-agent-problem/lagrange v0.0.0-20261110104422-8c2611a367d4
+	github.com/three-agent-problem/lagrange v0.0.0-20261110110304-26b6a696827e
 	gopkg.in/yaml.v3 v3.0.1
 	rsc.io/qr v0.2.0
 )

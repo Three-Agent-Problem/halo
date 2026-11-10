@@ -99,11 +99,20 @@ func TestConnectionsWizard(t *testing.T) {
 	if m.conn.st.Level != "questions" {
 		t.Fatalf("level = %q", m.conn.st.Level)
 	}
+	m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	if !m.conn.st.Connected || !m.conn.armed {
+		t.Fatal("one d should only ask")
+	}
+	_, cmd = m.Update(tea.KeyPressMsg{Code: 'd', Text: "d"})
+	step(cmd)
+	if m.conn.st.Connected || m.tgPaired || !strings.Contains(m.conn.note, "disconnected") {
+		t.Fatalf("after d d: %+v", m.conn.st)
+	}
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if m.conn != nil {
 		t.Fatal("esc should close")
 	}
-	if !strings.Contains(ansi.Strip(m.footer()), "✈") {
-		t.Fatal("no paired mark in the footer")
+	if strings.Contains(ansi.Strip(m.footer()), "✈") {
+		t.Fatal("the paired mark stayed after disconnecting")
 	}
 }
