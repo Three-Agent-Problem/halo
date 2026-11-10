@@ -5,3 +5,5 @@ spike-events.jsonl
 halo.yaml
 .serena/
 dist/
+go.work
+go.work.sum
