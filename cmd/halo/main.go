@@ -58,6 +58,7 @@ func run(ctx context.Context, args []string) error {
   halo merge                              list finished runs (halo/<run> branches)
   halo merge <run> [--keep]               merge a run into the checked-out branch, then clean it up
   halo connections                        connect Telegram: answer questions and follow runs from your phone
+  halo connections --status               print the Telegram connection, change nothing
   halo [-watch] [-since N]                the TUI; it hosts the team on this repository unless another halo does
   halo --demo                             the TUI playing a scripted run, no server needed
   halo version`)

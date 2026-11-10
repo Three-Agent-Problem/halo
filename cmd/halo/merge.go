@@ -114,33 +114,60 @@ func listRuns(ctx context.Context, repo string) error {
 		fmt.Println("no halo runs to merge")
 		return nil
 	}
+	reports := runReports(ctx)
 	for _, branch := range runs {
 		when, err := gitOut(ctx, repo, "log", "-1", "--format=%cr", branch)
 		if err != nil {
 			return err
 		}
-		fmt.Printf("%s\t%s\n", branch, when)
+		if h := headlineFor(reports, strings.TrimPrefix(branch, "halo/")); h != "" {
+			fmt.Printf("%s\t%s\t%s\n", branch, when, h)
+		} else {
+			fmt.Printf("%s\t%s\n", branch, when)
+		}
 	}
 	return nil
 }
 
-// runSummary is the run's situation report from Lagrange as Markdown, or "" when
-// there is no server, no such run, or no report. Best effort: merging doesn't need it.
-func runSummary(ctx context.Context, short string) string {
+// runReports fetches recent runs from Lagrange. Best effort: nil when there is
+// no server or the query fails.
+func runReports(ctx context.Context) []*client.Run {
 	st, err := config.LoadState()
 	if err != nil || st.Server == "" || st.Key == "" {
-		return ""
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	runs, err := client.New(st.Server, st.Key).Runs(ctx, client.RunFilter{Limit: 200})
 	if err != nil {
-		return ""
+		return nil
 	}
+	return runs
+}
+
+// findReport is the run with a report whose ID (dashes removed) ends in short.
+func findReport(runs []*client.Run, short string) *client.Run {
 	for _, r := range runs {
 		if r.Report != nil && strings.HasSuffix(strings.ReplaceAll(r.ID, "-", ""), short) {
-			return r.Report.Markdown()
+			return r
 		}
+	}
+	return nil
+}
+
+// headlineFor is the report headline of the run named short, or "".
+func headlineFor(runs []*client.Run, short string) string {
+	if r := findReport(runs, short); r != nil {
+		return strings.TrimSpace(r.Report.Headline)
+	}
+	return ""
+}
+
+// runSummary is the run's situation report from Lagrange as Markdown, or "" when
+// there is no server, no such run, or no report. Best effort: merging doesn't need it.
+func runSummary(ctx context.Context, short string) string {
+	if r := findReport(runReports(ctx), short); r != nil {
+		return r.Report.Markdown()
 	}
 	return ""
 }
