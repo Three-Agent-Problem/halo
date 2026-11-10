@@ -128,6 +128,11 @@ func (m *model) rosterKey(key string) (tea.Cmd, bool) {
 		if picked == nil || picked.Role == "human" || picked.Role == "other" || !m.editRoster() {
 			return nil, true
 		}
+		if picked.Model != "" && !contains(models, picked.Model) {
+			// Another coding agent (agy, Codex): its models aren't Claude's.
+			m.say(picked.Model + " runs another coding agent: change its model in halo.yaml")
+			return nil, true
+		}
 		ms := m.members()
 		for i := range ms {
 			if ms[i].Handle == picked.Handle {

@@ -31,7 +31,8 @@ type Config struct {
 	// Repo is the git repository the agents work on. Relative paths are resolved
 	// against the directory of halo.yaml.
 	Repo string `yaml:"repo"`
-	// ACP is the coding agent command, "claude-agent-acp" by default.
+	// ACP is the coding agent command, "claude-agent-acp" by default. An agent's
+	// own acp overrides it (see [Config.Command]).
 	ACP string `yaml:"acp"`
 	// Preview is the command that serves the project for the live preview row,
 	// e.g. "npm run dev". Setting it marks the project as a web project; without
@@ -53,6 +54,10 @@ type Agent struct {
 	Model    string `yaml:"model"`
 	Role     string `yaml:"role"`
 	Capacity int    `yaml:"capacity"`
+	// ACP is this agent's coding agent command, e.g. "agy acp --process-per-session";
+	// empty uses the roster's acp. Model is then whatever that agent calls its
+	// models (a session option), e.g. "gemini-3.8-flash-low".
+	ACP string `yaml:"acp,omitempty"`
 }
 
 // Default is the roster used when there is no halo.yaml.
@@ -134,6 +139,14 @@ func (c *Config) validate() error {
 		return fmt.Errorf("the roster needs exactly one lead, one reviewer and at least one worker")
 	}
 	return nil
+}
+
+// Command is the coding agent command an agent runs: its own acp, or the roster's.
+func (c *Config) Command(a Agent) string {
+	if a.ACP != "" {
+		return a.ACP
+	}
+	return c.ACP
 }
 
 // Handle is the Lagrange handle of a roster name.

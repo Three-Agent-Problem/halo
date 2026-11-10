@@ -212,3 +212,20 @@ agents:
   - {name: sonnet-2, model: sonnet, role: worker,   capacity: 1}
   - {name: reviewer, model: sonnet, role: reviewer, capacity: 4}
 ```
+
+### Other coding agents on the team
+
+Any agent that speaks ACP can be a worker next to the Claude ones. Give that agent its own `acp:` command, and set `model:` to a model name that agent uses. For example, a cheap Gemini worker through the Antigravity CLI:
+
+```yaml
+agents:
+  - {name: lead,     model: opus,   role: lead}
+  - {name: sonnet-1, model: sonnet}
+  - {name: agy-1,    model: gemini-3.8-flash-low, acp: agy acp --process-per-session}
+  - {name: reviewer, model: sonnet, role: reviewer}
+```
+
+- The model is set as an ACP session option. `agy models` lists the names. `agy` needs 1.5 or later (for `agy acp`) and a one-time `agy acp --login`.
+- Pass `--process-per-session` to `agy`: Halo gives every worker its tools as an HTTP MCP server, and agy only accepts those in that mode.
+- The lead sees these workers as "not Claude" and gives them precisely specified work. Escalating a subtask from one moves it to the cheapest Claude model in the roster.
+- Panel 7 keeps an agent's `acp:` when you edit the team, but `m` only cycles Claude models. Change other agents' models in the YAML.

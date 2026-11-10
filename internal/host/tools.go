@@ -93,7 +93,7 @@ type subIn struct {
 	Title      string   `json:"title" jsonschema:"3-5 words"`
 	Spec       string   `json:"spec" jsonschema:"what to build: files, functions, behavior; enough for someone new to the repo"`
 	Acceptance string   `json:"acceptance" jsonschema:"the tests or checks that prove it works"`
-	Model      string   `json:"model" jsonschema:"haiku, sonnet or opus"`
+	Model      string   `json:"model" jsonschema:"a worker model from your roster: haiku, sonnet, opus, or another model listed there"`
 	Deps       []string `json:"deps,omitempty" jsonschema:"ids of subtasks whose code this one needs"`
 }
 
@@ -208,7 +208,7 @@ func (h *Host) leadMCP() http.Handler {
 				}
 				return r.accept(ctx, in.SubtaskID)
 			})
-		mcp.AddTool(s, &mcp.Tool{Name: "escalate", Description: "Move a subtask one model up (haiku → sonnet → opus) and send it to a worker of that model in a fresh worktree."},
+		mcp.AddTool(s, &mcp.Tool{Name: "escalate", Description: "Move a subtask one model up (haiku → sonnet → opus; a non-Claude model moves to the cheapest Claude one) and send it to a worker of that model in a fresh worktree."},
 			func(ctx context.Context, _ *mcp.CallToolRequest, in escalateIn) (*mcp.CallToolResult, out, error) {
 				r, err := open()
 				if err != nil {
@@ -758,16 +758,23 @@ func (r *run) escalate(ctx context.Context, id, reason string) (*mcp.CallToolRes
 	}
 	models := h.cfg.WorkerModels()
 	next, found := s.Model, false
-	for {
+	if !slices.Contains(plan.Ladder, s.Model) {
+		// Not Claude (an agy or Codex worker): move to the cheapest Claude model
+		// in the roster.
+		for _, m := range plan.Ladder {
+			if slices.Contains(models, m) {
+				next, found = m, true
+				break
+			}
+		}
+	}
+	for !found {
 		n, ok := plan.Next(next)
 		if !ok {
 			break
 		}
 		next = n
-		if slices.Contains(models, n) {
-			found = true
-			break
-		}
+		found = slices.Contains(models, n)
 	}
 	if !found {
 		r.mu.Unlock()

@@ -45,7 +45,7 @@ func (h *Host) newWorker(ctx context.Context, a config.Agent, logw io.Writer) (*
 	if a.Role == config.RoleReviewer {
 		rules = a2aacp.ToolRules{Allow: []string{"*"}, Deny: []string{"edit", "delete", "move"}}
 	}
-	exec, err := a2aacp.NewExecutor(ctx, h.agent(w.handle, logw), &a2aacp.Config{
+	exec, err := a2aacp.NewExecutor(ctx, h.agent(a, logw), &a2aacp.Config{
 		Converter:  h.tap(w.handle),
 		AutoAnswer: rules,
 		Settings: func(context.Context, *a2asrv.ExecutorContext) (map[string]any, error) {

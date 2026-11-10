@@ -2,18 +2,34 @@ package host
 
 import (
 	"fmt"
+	"slices"
 	"strings"
+
+	"github.com/three-agent-problem/halo/internal/plan"
 )
 
 // leadPrompt is prepended to the first message of a run the lead gets.
 func leadPrompt(lead, human string, workers map[string][]string, reviewer string) string {
-	var roster []string
-	for _, m := range []string{"haiku", "sonnet", "opus"} {
+	var roster, others []string
+	for _, m := range plan.Ladder {
 		if hs := workers[m]; len(hs) > 0 {
 			roster = append(roster, fmt.Sprintf("- %s: %s", m, strings.Join(hs, ", ")))
 		}
 	}
-	return fmt.Sprintf(`You are @%s, the lead engineer of a Halo team. You plan and coordinate; you never write code yourself. Your workers are Claude Code agents in their own git worktrees:
+	for m := range workers {
+		if !slices.Contains(plan.Ladder, m) {
+			others = append(others, m)
+		}
+	}
+	slices.Sort(others)
+	for _, m := range others {
+		roster = append(roster, fmt.Sprintf("- %s: %s", m, strings.Join(workers[m], ", ")))
+	}
+	extra := ""
+	if len(others) > 0 {
+		extra = "\n   - " + strings.Join(others, ", ") + ": not Claude, another coding agent the person added to the team. Give it work you would give haiku when the spec is precise; escalating it moves the subtask to the cheapest Claude model."
+	}
+	return fmt.Sprintf(`You are @%s, the lead engineer of a Halo team. You plan and coordinate; you never write code yourself. Your workers are coding agents in their own git worktrees:
 %s
 Reviewer: @%s. The person you work for: @%s.
 
@@ -23,7 +39,7 @@ How a run goes. Use the halo MCP tools for every step; each one is a real messag
 2. publish_plan: a goal and 2-8 subtasks. Each subtask gets an id (S1, S2, ...), a short title, a precise spec (files, functions, behavior), acceptance criteria (which tests or checks prove it), deps, and a model:
    - haiku: mechanical, well-specified work (a migration, boilerplate, docs, a small isolated change)
    - sonnet: normal feature work, tests, integration with existing code
-   - opus: hard design, cross-cutting changes, tricky debugging
+   - opus: hard design, cross-cutting changes, tricky debugging%s
    Prefer parallel subtasks; add a dependency only when one piece really needs another's code.
 3. ask_human with approve_plan=true and a short summary of the plan. Wait for the answer with wait_events. If @%s rejects, revise with publish_plan and ask again.
 4. Delegate every subtask whose dependencies are done (several at once). Then loop on wait_events:
@@ -37,7 +53,7 @@ How a run goes. Use the halo MCP tools for every step; each one is a real messag
 5. When every subtask is done halo merges the run branch into the branch you started from and removes the worktrees; wait for the merged event, then reply with the summary (say whether it merged): what was built, the run branch, review rounds and escalations, and anything @%s should check. If the merge failed, follow the event's next step.
 
 Keep your own messages short. Do not edit files and do not ask @%s questions in plain text: use the tools.`,
-		lead, strings.Join(roster, "\n"), reviewer, human, human, human, human, human, human, human, human)
+		lead, strings.Join(roster, "\n"), reviewer, human, human, extra, human, human, human, human, human, human)
 }
 
 // workerPrompt is prepended to the first message of a subtask a worker gets.

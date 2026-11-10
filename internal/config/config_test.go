@@ -430,3 +430,43 @@ func TestLagrangeLogin(t *testing.T) {
 		t.Fatalf("got %q %q", s, k)
 	}
 }
+
+func TestPerAgentACP(t *testing.T) {
+	dir := t.TempDir()
+	p := writeFile(t, dir, "halo.yaml", `
+agents:
+  - {name: lead, model: opus, role: lead}
+  - {name: sonnet-1, model: sonnet}
+  - {name: agy-1, model: gemini-3.8-flash-low, acp: agy acp --process-per-session}
+  - {name: reviewer, model: sonnet, role: reviewer}
+`)
+	c, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	agy, _ := c.Agent(c.Handle("agy-1"))
+	if got := c.Command(agy); got != "agy acp --process-per-session" {
+		t.Errorf("Command(agy-1) = %q, want the agent's own acp", got)
+	}
+	son, _ := c.Agent(c.Handle("sonnet-1"))
+	if got := c.Command(son); got != "claude-agent-acp" {
+		t.Errorf("Command(sonnet-1) = %q, want the roster default", got)
+	}
+
+	out := filepath.Join(dir, "saved.yaml")
+	if err := c.SaveRoster(out); err != nil {
+		t.Fatalf("SaveRoster: %v", err)
+	}
+	back, err := Load(out)
+	if err != nil {
+		t.Fatalf("Load saved: %v", err)
+	}
+	agy, _ = back.Agent(back.Handle("agy-1"))
+	if agy.ACP != "agy acp --process-per-session" || agy.Model != "gemini-3.8-flash-low" {
+		t.Errorf("saved agy-1 = %+v, want its acp and model kept", agy)
+	}
+	raw, _ := os.ReadFile(out)
+	if strings.Count(string(raw), "acp:") != 1 {
+		t.Errorf("saved roster should write acp only for agy-1:\n%s", raw)
+	}
+}

@@ -30,10 +30,11 @@ import (
 	"github.com/three-agent-problem/halo/internal/shells"
 )
 
-// agent is how an agent's Claude Code process starts: under a marker sh, so the
-// TUI can find its shells, and with long MCP tool calls allowed.
-func (h *Host) agent(handle string, logw io.Writer) a2aacp.Process {
-	return a2aacp.Process{Argv: shells.Wrap(handle, strings.Fields(h.cfg.ACP)), Dir: h.cfg.Repo, Stderr: logw,
+// agent is how an agent's coding agent process starts (its own acp command, or
+// the roster's): under a marker sh, so the TUI can find its shells, and with long
+// MCP tool calls allowed.
+func (h *Host) agent(a config.Agent, logw io.Writer) a2aacp.Process {
+	return a2aacp.Process{Argv: shells.Wrap(h.handle(a), strings.Fields(h.cfg.Command(a))), Dir: h.cfg.Repo, Stderr: logw,
 		Env: append(os.Environ(), "MCP_TOOL_TIMEOUT=1800000")}
 }
 
@@ -235,6 +236,9 @@ func card(handle string, a config.Agent) *a2a.AgentCard {
 		config.RoleWorker:   "A Claude Code worker on " + a.Model + ". Builds one subtask in its own git worktree.",
 		config.RoleReviewer: "Reviews a subtask's diff and answers APPROVE or CHANGES.",
 	}[a.Role]
+	if a.ACP != "" && a.Role == config.RoleWorker {
+		desc = "A worker running " + strings.Fields(a.ACP)[0] + " on " + a.Model + ". Builds one subtask in its own git worktree."
+	}
 	return &a2a.AgentCard{
 		Name:                "halo " + a.Name,
 		Description:         desc,

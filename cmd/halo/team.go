@@ -105,7 +105,11 @@ func (t *team) SetMembers(_ context.Context, ms []tui.Member) error {
 		if m.Role != config.RoleWorker {
 			capacity = 4
 		}
-		n.Agents = append(n.Agents, config.Agent{Name: m.Name, Model: m.Model, Role: m.Role, Capacity: capacity})
+		a := config.Agent{Name: m.Name, Model: m.Model, Role: m.Role, Capacity: capacity}
+		if old, ok := t.cfg.Agent(t.cfg.Handle(m.Name)); ok {
+			a.ACP = old.ACP // the TUI doesn't edit it: keep halo.yaml's
+		}
+		n.Agents = append(n.Agents, a)
 	}
 	if err := n.SaveRoster(t.path); err != nil {
 		return err
