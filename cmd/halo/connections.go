@@ -64,6 +64,9 @@ stop or message anything, and typed text goes nowhere.
 				return err
 			}
 		}
+		if t == "" {
+			return errors.New("no token: paste the one @BotFather sent, or pass --token")
+		}
 		if tg, err = c.ConnectTelegram(ctx, t); err != nil {
 			return err
 		}
