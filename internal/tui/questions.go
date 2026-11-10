@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
-	"github.com/three-agent-problem/halo/internal/ask"
+	"github.com/three-agent-problem/lagrange/ask"
 )
 
 // qform is the lead's multiple-choice questions being answered: one tab per

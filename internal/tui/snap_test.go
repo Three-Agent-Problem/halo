@@ -340,6 +340,33 @@ func TestSnapshot(t *testing.T) {
 			m.ui.Help, m.ui.Query = true, q
 			continue
 		}
+		// /command runs a slash command; paste:<text> pastes; enter, with a dialog
+		// open, goes to it; sleep:N waits N seconds (unlocked).
+		run := func(cmd tea.Cmd) {
+			if cmd == nil {
+				return
+			}
+			if msg := cmd(); msg != nil {
+				m.Update(msg)
+			}
+		}
+		switch {
+		case strings.HasPrefix(k, "/"):
+			run(m.command(k))
+			continue
+		case strings.HasPrefix(k, "paste:"):
+			m.Update(tea.PasteMsg{Content: strings.TrimPrefix(k, "paste:")})
+			continue
+		case strings.HasPrefix(k, "sleep:"):
+			n, _ := strconv.Atoi(strings.TrimPrefix(k, "sleep:"))
+			mu.Unlock()
+			time.Sleep(time.Duration(n) * time.Second)
+			mu.Lock()
+			continue
+		case m.conn != nil && k == "enter":
+			run(m.connKey(tea.KeyPressMsg{Code: tea.KeyEnter}))
+			continue
+		}
 		m.normalKey(k)
 	}
 	out := toHTML(m.render(time.Now()))

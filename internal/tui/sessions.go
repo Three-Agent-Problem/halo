@@ -16,6 +16,8 @@ var commands = [][2]string{
 	{"/clear", "start fresh: a new conversation with the lead"},
 	{"/resume", "reopen a past run and continue its conversation"},
 	{"/merge", "land the current run on your branch now"},
+	{"/summary", "the run's summary: what it built, what it cost"},
+	{"/connections", "connect Telegram: answer and follow runs from your phone"},
 	{"/agents", "edit the team (panel 7)"},
 	{"/help", "every key"},
 }
@@ -82,6 +84,14 @@ func (m *model) command(text string) tea.Cmd {
 		return m.fetchRuns(false)
 	case "/help":
 		m.ui.Help, m.ui.Query = true, ""
+	case "/summary":
+		if m.st.Report == nil {
+			m.say("no summary yet: the run publishes one once its plan is up")
+		} else {
+			m.summary = true
+		}
+	case "/connections":
+		return m.openConnections()
 	case "/agents":
 		m.ui.SetFocus(pRoster)
 	case "/merge":

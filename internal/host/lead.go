@@ -17,6 +17,8 @@ import (
 	"github.com/three-agent-problem/lagrange/delegate"
 
 	"github.com/three-agent-problem/halo/internal/config"
+	"github.com/three-agent-problem/lagrange/report"
+
 	"github.com/three-agent-problem/halo/internal/plan"
 )
 
@@ -162,7 +164,7 @@ func (l *lead) runFor(ctx context.Context, ec *a2asrv.ExecutorContext) *run {
 	// A new prompt in a context the lead knows (a resumed conversation) is a new
 	// run: its own plan and branch, but the same Claude session, which remembers.
 	l.nruns++
-	r := &run{l: l, id: id, short: shortID(id), seq: l.nruns, events: make(chan event, 256), questions: map[string]*question{}}
+	r := &run{l: l, id: id, short: shortID(id), seq: l.nruns, events: make(chan event, 256), questions: map[string]*question{}, started: time.Now()}
 	l.runs[id], l.byCtx[ec.ContextID], l.ctxOf[id] = r, r, ec.ContextID
 	return r
 }
@@ -258,6 +260,10 @@ type run struct {
 	qseq      int
 	approval  string // the task asking for plan approval
 	subs      map[string]*subRT
+	started   time.Time     // when the run started
+	waited    time.Duration // how long it waited on the person
+	changes   string        // the run branch's diff stat, once it lands
+	final     *report.Report
 }
 
 // landState is how far merging the finished run branch into base got. It only ever
@@ -309,10 +315,8 @@ func (r *run) publishLocked() {
 	_ = json.Unmarshal(raw, &data)
 	ev := &a2a.TaskArtifactUpdateEvent{TaskID: r.ec.TaskID, ContextID: r.ec.ContextID,
 		Artifact: &a2a.Artifact{ID: "halo-plan", Name: plan.ArtifactName, Parts: a2a.ContentParts{a2a.NewDataPart(data)}}}
-	select {
-	case r.emit <- ev:
-	default:
-	}
+	r.emitLocked(ev)
+	r.publishReportLocked("")
 }
 
 // update changes a subtask under the lock and publishes the plan.

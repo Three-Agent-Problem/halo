@@ -46,6 +46,8 @@ func run(ctx context.Context, args []string) error {
 			return agentsCmd(ctx, args[1:])
 		case "merge":
 			return mergeCmd(ctx, args[1:])
+		case "connections":
+			return connectionsCmd(ctx, args[1:])
 		case "version", "--version", "-v":
 			fmt.Println("halo", version, commit)
 			return nil
@@ -55,6 +57,7 @@ func run(ctx context.Context, args []string) error {
   halo agents [-config halo.yaml]         run the team headless (halo hosts it itself; this is for another machine)
   halo merge                              list finished runs (halo/<run> branches)
   halo merge <run> [--keep]               merge a run into the checked-out branch, then clean it up
+  halo connections                        connect Telegram: answer questions and follow runs from your phone
   halo [-watch] [-since N]                the TUI; it hosts the team on this repository unless another halo does
   halo --demo                             the TUI playing a scripted run, no server needed
   halo version`)

@@ -9,6 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/a2aproject/a2a-go/v2/a2a"
+	"github.com/a2aproject/a2a-go/v2/a2asrv"
+	"github.com/three-agent-problem/lagrange/report"
+
 	"github.com/three-agent-problem/halo/internal/config"
 	"github.com/three-agent-problem/halo/internal/plan"
 )
@@ -157,5 +161,44 @@ func TestLandFailureKeepsRun(t *testing.T) {
 	r.plan.Subtasks[0].Status = plan.Ready
 	if _, _, land := r.mergeSub(ctx, "S1"); land {
 		t.Error("landed twice")
+	}
+}
+
+// A landed run publishes its final report on the root task: what it built, with the
+// branch's changes, for the Runs page and the person's Telegram.
+func TestLandPublishesFinalReport(t *testing.T) {
+	r, _ := testRun(t, "S1", "S2")
+	ctx := context.Background()
+	r.mu.Lock()
+	r.plan.Subtasks[0].Title, r.plan.Subtasks[0].Model, r.plan.Subtasks[0].Round = "token bucket", "sonnet", 2
+	r.plan.Subtasks[1].Title, r.plan.Subtasks[1].Model, r.plan.Subtasks[1].Escalated = "docs", "sonnet", true
+	r.plan.Goal = "Add rate limiting\nwith details"
+	r.mu.Unlock()
+	ec := &a2asrv.ExecutorContext{TaskID: "root", ContextID: "ctx"}
+	emit := r.attach(ec)
+	r.mergeSub(ctx, "S1")
+	r.mergeSub(ctx, "S2")
+	r.land(ctx)
+
+	var final *report.Report
+	for len(emit) > 0 {
+		ev := <-emit
+		if a, ok := ev.(*a2a.TaskArtifactUpdateEvent); ok {
+			if rep, ok := report.Find(a.Artifact.Parts); ok {
+				final = &rep
+			}
+		}
+	}
+	if final == nil || !final.Final() {
+		t.Fatalf("no final report: %+v", final)
+	}
+	md := final.Markdown()
+	for _, want := range []string{"**Add rate limiting**", "landed on main · 2/2 done", "Merged halo/abc123 into main.", "- S1 token bucket · sonnet · 2 review rounds", "- S2 docs · escalated to sonnet", "Review rounds: 2", "Escalations: 1", "Changes: 2 files +2 −0"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("report lacks %q:\n%s", want, md)
+		}
+	}
+	if final.Notice == "" {
+		t.Error("the final report has no notice")
 	}
 }

@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/three-agent-problem/halo/internal/ask"
+	"github.com/three-agent-problem/lagrange/ask"
 )
 
 type answerRec struct {

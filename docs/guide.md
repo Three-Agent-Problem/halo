@@ -167,7 +167,15 @@ When every subtask has been reviewed and merged into `halo/<run>`, Halo merges t
   git log --oneline --graph -10   # the run's merge on top
   ```
 
+The **run summary** opens on top: what each subtask built, wall time, review rounds, escalations and cost. `c` copies it as Markdown, `esc` closes it, and `/summary` brings it back.
+
 Then press `i` for the next prompt. It continues the same conversation, so the lead remembers this run. `/clear` starts fresh, and `/resume` reopens any past run.
+
+## Optional · Answer from your phone (Telegram)
+
+Type `/connections` in the TUI (or run `halo connections`) and follow the three steps: create a bot with @BotFather (`/newbot`), paste its token (hidden as you type), then scan the QR code and tap **Start** in Telegram.
+
+✅ **You should see:** "✓ paired" in the dialog, a test message in Telegram, and `✈` in the footer. From then on the lead's questions and the plan approval arrive in Telegram with buttons, and the run summary arrives when the run lands. The bot can only press those buttons and show status (`/status`, `/waiting`, `/runs`): it can't start or stop anything.
 
 ---
 
@@ -181,6 +189,7 @@ Then press `i` for the next prompt. It continues the same conversation, so the l
 | `halo: command not found` | With `go install`, add `$(go env GOPATH)/bin` to your `PATH`. |
 | Lagrange's Live page only updates on reload | A proxy is buffering server-sent events. Locally this doesn't happen. Behind nginx or Traefik, turn off buffering for `/api/events`. |
 | The final merge failed (conflict with your branch) | Fix your branch, then run `halo merge <run>`. `halo merge` alone lists runs. |
+| Telegram says "This bot is already connected" or nothing arrives | One bot, one Lagrange account: make a new bot for another account. Check `/connections` says paired, and that the bot isn't muted (`/unmute` in Telegram). Only one Lagrange server may poll a bot. |
 | Start over with a different server or key | Delete `~/Library/Application Support/halo/state.json` (Linux: `~/.config/halo/state.json`) and run `halo` again. |
 
 ## Change the team

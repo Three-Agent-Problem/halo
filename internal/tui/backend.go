@@ -17,8 +17,8 @@ import (
 	"github.com/three-agent-problem/lagrange/client"
 	"github.com/three-agent-problem/lagrange/code"
 
-	"github.com/three-agent-problem/halo/internal/ask"
 	"github.com/three-agent-problem/halo/internal/lg"
+	"github.com/three-agent-problem/lagrange/ask"
 )
 
 // Wait is a task waiting on you.

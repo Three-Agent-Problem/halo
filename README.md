@@ -82,6 +82,9 @@ cd ~/code/your-repo && halo      # asks for the server and the key once, then ho
 | ![The run's commits as a graph](docs/screenshots/commits.png) | ![Every key, searchable](docs/screenshots/help.png) |
 | **`5` `+`: the commit graph, live.** One lane per subtask branch, colored by model, with merges as `◆`. `enter` opens the diff. | **`?`: every key, searchable.** Type to narrow it down. |
 
+| ![The run summary card](docs/screenshots/summary.png) | ![Pairing Telegram with a QR code](docs/screenshots/telegram-pair.png) |
+| **The run summary.** It opens when the run lands (`/summary` reopens it): what was built, wall time, review rounds, escalations, cost. `c` copies it as Markdown. | **`/connections`: Telegram.** Paste a @BotFather token, scan the code, and questions reach your phone with buttons to answer. |
+
 ![The plan at full size: a timeline with a lane per agent](docs/screenshots/timeline.png)
 <sub>**`1` `+` `+` `+`: the plan at full size** is a timeline with a lane per agent: working, in review, waiting on you, and what each one does now.</sub>
 
@@ -108,7 +111,7 @@ It works like lazygit: every panel has a number, and `enter` opens the selected 
 | `enter` / `esc` | Open / go back. |
 | `i` | Prompt the lead. |
 | `a` | Answer what is waiting on you: `y` approves, `n` rejects, `r` replies. The lead's multiple-choice questions open as a form. |
-| `/` | Commands: `/clear` starts fresh, `/resume` reopens a past run, `/merge` lands the run now, plus `/agents` and `/help`. |
+| `/` | Commands: `/clear` starts fresh, `/resume` reopens a past run, `/merge` lands the run now, `/summary` shows the run summary, `/connections` connects Telegram, plus `/agents` and `/help`. |
 | `ctrl+v` | While typing: paste a screenshot from the clipboard, or drag in an image file. |
 | `x` | In the plan or agent panel: stop that subtask's worker (asks y/n first). Elsewhere, `x` `x` cancels the run. |
 | `?` | Every key. Type to search. |
@@ -122,7 +125,7 @@ The lead orchestrates only through MCP tools. Each tool call is a Lagrange task,
 
 | Tool | What it does |
 |---|---|
-| `ask_human` | Asks you something: up to 4 multiple-choice `questions`, or a plan approval. It shows in the TUI and in your Lagrange inbox, and reaches your phone by email or Slack. |
+| `ask_human` | Asks you something: up to 4 multiple-choice `questions`, or a plan approval. It shows in the TUI and in your Lagrange inbox, and reaches your phone by Telegram (with buttons), email or Slack. |
 | `publish_plan` | The goal and the subtasks (id, spec, acceptance, model, deps). The plan streams to the TUI as the `halo.plan` artifact. |
 | `delegate` | Sends a subtask whose dependencies are merged to the least busy worker of its model, in a fresh worktree of `halo/<run>`. |
 | `wait_events` | Waits for what happened: worker questions (`ask_lead`, answered with `answer`), finished or failed subtasks, reviews, merge conflicts, your answers. |
@@ -130,6 +133,20 @@ The lead orchestrates only through MCP tools. Each tool call is a Lagrange task,
 | `escalate` | Retries a failed subtask one model up. |
 
 Once every subtask is merged, Halo merges `halo/<run>` into the branch you started from. If that fails, `halo merge <run>` retries it later, and `halo merge` on its own lists runs.
+
+All along, the run keeps a **situation report** on its root task (Lagrange's `report` extension): status, progress, what each merged subtask built (model, review rounds, time), wall time, review rounds, escalations, time spent waiting on you, and the diff size. Lagrange's Runs page shows it as a card, Telegram gets its notices (a subtask failed, an escalation, a conflict, landed), and when the run lands the TUI opens it as the run summary. `halo merge` prints it too.
+
+## Telegram
+
+Step away and keep the run moving: `/connections` in the TUI (or `halo connections`) links your own Telegram bot to your Lagrange account. The bot lives in Lagrange, not in Halo, so Lagrange → Settings → Telegram is the same connection, and it works for any agent that asks you something.
+
+1. In Telegram, open @BotFather, send `/newbot`, and paste the token it gives you.
+2. Scan the QR code (or open the link) and tap **Start**. That pairs the bot with your chat. The link works once, for 10 minutes.
+3. Halo sends a test message. `l` switches between *only questions* and *questions plus runs' news and summaries*.
+
+What reaches Telegram: the lead's questions as option buttons, the plan approval as Approve/Reject (Approve asks again), reminders and escalations, notices from the run report, and the run summary when it ends. When you answer in the TUI or the inbox, the Telegram message updates itself.
+
+**It can't do much, on purpose.** The bot only answers with its buttons, and only in your private chat with the paired Telegram account. It can't start, stop, cancel or message anything, typed text gets a fixed refusal, and messages never carry a link that would let you type an answer. Besides buttons it knows `/status`, `/waiting`, `/runs`, `/mute`, `/unmute` and `/help`. A `✈` in the footer means a bot is paired.
 
 ## Good to know
 
@@ -146,7 +163,8 @@ Once every subtask is merged, Halo merges `halo/<run>` into the branch you start
 | `halo -watch` | Watch only. |
 | `halo init --server URL --key lgk_…` | Save the server and key, and create the addresses, without opening the TUI. |
 | `halo agents` | Run the team headless. |
-| `halo merge [run] [--keep]` | List finished runs, or merge one into the checked-out branch. |
+| `halo merge [run] [--keep]` | List finished runs, or merge one into the checked-out branch, then print its summary. |
+| `halo connections [--level questions\|milestones] [--pair] [--test]` | Connect Telegram in the terminal (token hidden, QR code to pair). |
 | `halo version` | The installed version. |
 
 ## Built on

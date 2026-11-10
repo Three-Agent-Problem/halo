@@ -6,6 +6,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/three-agent-problem/lagrange/report"
+
 	"github.com/three-agent-problem/halo/internal/lg"
 	"github.com/three-agent-problem/halo/internal/plan"
 )
@@ -137,6 +139,10 @@ type State struct {
 	Prompt    string
 	Tasks     map[string]*Task
 	Plan      *plan.Plan
+	// Report is the run's latest situation report (lagrange/report); ReportNew is
+	// set when a final one arrives live, so the TUI opens the summary card.
+	Report    *report.Report
+	ReportNew bool
 	planArt   string
 	Follow    bool
 	// Hosted is set when this Halo hosts the team: the agents' raw output comes
@@ -324,7 +330,9 @@ func (s *State) raw(e lg.Entry) {
 	text := e.Summary
 	switch e.Kind {
 	case "artifact":
-		if e.Summary == plan.ArtifactName || e.Str("artifactId") == s.planArt {
+		if e.Data["report"] != nil {
+			text = "report"
+		} else if e.Summary == plan.ArtifactName || e.Str("artifactId") == s.planArt {
 			text = "halo.plan"
 		} else {
 			text = fmt.Sprintf("append +%dB", len(e.Str("content")))
@@ -489,6 +497,13 @@ func (s *State) artifact(e lg.Entry, now time.Time, live bool) {
 		return
 	}
 	id := e.Str("artifactId")
+	if rep, ok := report.FromMap(e.Data["report"]); ok {
+		if e.TaskID == s.Root {
+			s.Report = &rep
+			s.ReportNew = s.ReportNew || (rep.Final() && live)
+		}
+		return
+	}
 	if e.Summary == plan.ArtifactName || (id != "" && id == s.planArt) {
 		s.planArt = id
 		var p plan.Plan

@@ -9,7 +9,11 @@ import (
 	"os/exec"
 	"regexp"
 	"strings"
+	"time"
 
+	"github.com/three-agent-problem/lagrange/client"
+
+	"github.com/three-agent-problem/halo/internal/config"
 	"github.com/three-agent-problem/halo/internal/host"
 )
 
@@ -89,6 +93,10 @@ func mergeCmd(ctx context.Context, args []string) error {
 		return err
 	}
 	fmt.Println(summary)
+	if md := runSummary(ctx, run); md != "" {
+		fmt.Println()
+		fmt.Println(md)
+	}
 	if *keep {
 		return nil
 	}
@@ -114,4 +122,25 @@ func listRuns(ctx context.Context, repo string) error {
 		fmt.Printf("%s\t%s\n", branch, when)
 	}
 	return nil
+}
+
+// runSummary is the run's situation report from Lagrange as Markdown, or "" when
+// there is no server, no such run, or no report. Best effort: merging doesn't need it.
+func runSummary(ctx context.Context, short string) string {
+	st, err := config.LoadState()
+	if err != nil || st.Server == "" || st.Key == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	runs, err := client.New(st.Server, st.Key).Runs(ctx, client.RunFilter{Limit: 200})
+	if err != nil {
+		return ""
+	}
+	for _, r := range runs {
+		if r.Report != nil && strings.HasSuffix(strings.ReplaceAll(r.ID, "-", ""), short) {
+			return r.Report.Markdown()
+		}
+	}
+	return ""
 }

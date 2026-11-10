@@ -9,9 +9,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/three-agent-problem/halo/internal/ask"
 	"github.com/three-agent-problem/halo/internal/lg"
 	"github.com/three-agent-problem/halo/internal/plan"
+	"github.com/three-agent-problem/lagrange/ask"
+	"github.com/three-agent-problem/lagrange/report"
 )
 
 // Demo is a Backend that plays a scripted run, shaped exactly like Lagrange's
@@ -227,6 +228,16 @@ func (d *Demo) art(id, artID, name, content string, appendIt bool) {
 	d.mu.Unlock()
 	d.send(lg.Entry{Kind: "artifact", TaskID: id, ParentTaskID: t.parent, Sender: t.from, Recipient: t.to, Summary: name,
 		Data: map[string]any{"artifactId": artID, "append": appendIt, "content": content}})
+}
+
+// report publishes a situation report on task id, as the relay records it.
+func (d *Demo) report(id string, r report.Report) {
+	d.mu.Lock()
+	t := d.tasks[id]
+	d.mu.Unlock()
+	r.At = time.Now()
+	d.send(lg.Entry{Kind: "artifact", TaskID: id, ParentTaskID: t.parent, Sender: t.from, Recipient: t.to, Summary: "report: " + r.Headline,
+		Data: map[string]any{"artifactId": report.ArtifactName, "report": r.Map()}})
 }
 
 // work plays a worker's tool calls over about d.
@@ -465,5 +476,18 @@ func (d *Demo) run(ctx context.Context) {
 	d.commit("halo: merge " + p.Branch)
 	p.MergedInto = "main"
 	publish()
+	d.report(root, report.Report{
+		Headline: p.Goal, Status: "landed on main", Progress: &report.Progress{Done: 5, Total: 5},
+		Built: []report.Item{
+			{Title: "S1 schema migration", Detail: "haiku · 1m"},
+			{Title: "S2 pg task store", Detail: "sonnet · 2 review rounds · 3m"},
+			{Title: "S3 /api/tasks routes", Detail: "sonnet · 2m"},
+			{Title: "S4 web task form", Detail: "escalated to sonnet · 2m"},
+			{Title: "S5 integrate + checks", Detail: "opus · 1m"},
+		},
+		Stats: []report.Stat{{Label: "Wall time", Value: "9m"}, {Label: "Review rounds", Value: "2"}, {Label: "Escalations", Value: "1"},
+			{Label: "Waited on you", Value: "8s"}, {Label: "Changes", Value: "14 files +612 −48"}},
+		Outcome: "Merged " + p.Branch + " into main.", Notice: "Merged " + p.Branch + " into main.",
+	})
 	d.reply(root, "Run complete: 5/5 merged into "+p.Branch+", then "+p.Branch+" merged into main. 2 review rounds on S2, S4 moved up from haiku to sonnet.")
 }

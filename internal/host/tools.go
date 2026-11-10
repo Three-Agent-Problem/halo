@@ -13,10 +13,10 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/three-agent-problem/halo/internal/ask"
 	"github.com/three-agent-problem/halo/internal/config"
 	"github.com/three-agent-problem/halo/internal/lg"
 	"github.com/three-agent-problem/halo/internal/plan"
+	"github.com/three-agent-problem/lagrange/ask"
 )
 
 // out is every tool's result: one readable string.
@@ -312,6 +312,10 @@ func (r *run) askHuman(ctx context.Context, in askHumanIn) (*mcp.CallToolResult,
 		call.Text = strings.TrimSpace(nonEmpty(in.Question, "A few questions before I plan:") + "\n\n" + ask.Text(in.Questions))
 		call.Meta = map[string]any{ask.MetaKey: in.Questions}
 	}
+	if in.ApprovePlan {
+		// Clients with buttons (Lagrange's inbox, Telegram) show Approve and Reject.
+		call.Meta = map[string]any{ask.ApprovalKey: true}
+	}
 	res, err := h.caller(r.l.handle).Send(ctx, call)
 	if err != nil {
 		return nil, out{}, err
@@ -326,11 +330,15 @@ func (r *run) askHuman(ctx context.Context, in askHumanIn) (*mcp.CallToolResult,
 		r.approval = id
 		r.mu.Unlock()
 	}
+	asked := time.Now()
 	go func() {
 		state, text, err := h.await(h.ctx, id)
 		if err != nil {
 			return
 		}
+		r.mu.Lock()
+		r.waited += time.Since(asked)
+		r.mu.Unlock()
 		approved := state == a2a.TaskStateCompleted
 		e := event{Kind: "human", ID: id, From: "@" + h.st.Human, Text: text, Approved: &approved}
 		if in.ApprovePlan {
@@ -504,6 +512,7 @@ func (r *run) workEnded(id, worker string, state a2a.TaskState, text string) {
 		return
 	}
 	r.update(id, func(s *plan.Subtask) { s.Status, s.Note = plan.Failed, firstLine(nonEmpty(text, string(state))) })
+	r.notice("%s failed on @%s: %s", id, worker, clip(firstLine(nonEmpty(text, string(state))), 200))
 	r.push(event{Kind: "subtask_failed", Subtask: id, From: "@" + worker, Text: clip(nonEmpty(text, string(state)), 1500),
 		Hint: "escalate, or follow_up with guidance"})
 }
@@ -626,6 +635,7 @@ func (r *run) mergeSub(ctx context.Context, id string) (msg, kind string, land b
 	if err != nil || conflicts != "" {
 		why := nonEmpty(conflicts, fmt.Sprint(err))
 		r.update(id, func(s *plan.Subtask) { s.Status, s.Note = plan.Conflict, "conflict: "+firstLine(why) })
+		r.notice("%s doesn't merge into %s: %s", id, branch, clip(firstLine(why), 200))
 		return "Merge into " + branch + " failed: " + why, "conflict", false
 	}
 	r.mu.Lock()
@@ -690,11 +700,16 @@ func (r *run) land(ctx context.Context) {
 	r.mu.Unlock()
 	var summary string
 	if err == nil {
+		changes := diffStat(ctx, h.cfg.Repo, base, branch)
+		r.mu.Lock()
+		r.changes = changes
+		r.mu.Unlock()
 		summary, err = Land(ctx, h.cfg.Repo, branch, base)
 	}
 	if err != nil {
 		r.mu.Lock()
 		r.landing = landFailed
+		r.publishReportLocked(fmt.Sprintf("Couldn't merge %s into %s; the branch is kept (halo merge %s).", branch, nonEmpty(base, "a base branch"), r.short))
 		r.mu.Unlock()
 		merged := false
 		r.push(event{Kind: "merged", Text: fmt.Sprintf("halo couldn't merge %s into %s: %s", branch, nonEmpty(base, "a base branch"), err), Approved: &merged,
@@ -709,7 +724,9 @@ func (r *run) land(ctx context.Context) {
 	r.landing, r.runDir = landMerged, ""
 	r.plan.MergedInto = base
 	r.publishLocked()
+	_, emit, final := r.finalReportLocked(fmt.Sprintf("Merged %s into %s.", branch, base))
 	r.mu.Unlock()
+	sendFinal(emit, final)
 	merged := true
 	r.push(event{Kind: "merged", Text: summary, Approved: &merged,
 		Hint: "every subtask is done and the run is merged into " + base + "; reply with your summary"})
@@ -759,6 +776,7 @@ func (r *run) escalate(ctx context.Context, id, reason string) (*mcp.CallToolRes
 	prev, prevBranch, sid := s.Model, r.rt(s.ID).branch, s.ID
 	s.Model, s.Escalated, s.Status = next, true, plan.Pending
 	r.publishLocked()
+	r.publishReportLocked(fmt.Sprintf("%s escalated from %s to %s: %s", sid, prev, next, clip(firstLine(reason), 200)))
 	r.mu.Unlock()
 	return r.delegate(ctx, sid, fmt.Sprintf("A %s worker tried this before you and fell short: %s. Its work is on branch %s if it helps.", prev, reason, prevBranch))
 }

@@ -12,6 +12,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/three-agent-problem/lagrange/client"
+
 	"github.com/three-agent-problem/halo/internal/lg"
 	"github.com/three-agent-problem/halo/internal/plan"
 )
@@ -96,6 +98,10 @@ type model struct {
 	flashAt       time.Time
 	cancelArm     time.Time
 	quitAsk       bool              // the quit dialog is open
+	summary       bool              // the run summary card is open
+	conn          *connWizard       // the /connections dialog, when open
+	tgPaired      bool              // a Telegram bot is paired (footer mark)
+	tgTip         bool              // the Telegram tip was shown this session
 	confirm       *confirm          // a y/n question in front of an action
 	blurred       bool              // the terminal reported losing focus
 	focusKnown    bool              // ... so it reports focus at all
@@ -185,7 +191,12 @@ func (m *model) fetch() tea.Cmd {
 }
 
 func (m *model) Init() tea.Cmd {
-	return tea.Batch(tick(), m.fetch(), m.poll(), m.fetchRuns(true), m.fetchShells())
+	cmds := []tea.Cmd{tick(), m.fetch(), m.poll(), m.fetchRuns(true), m.fetchShells()}
+	if m.connector() != nil {
+		// Whether Telegram is paired: the footer shows it, and the tip waits for it.
+		cmds = append(cmds, m.tgDo(func(ctx context.Context, c Connector) (*client.Telegram, error) { return c.Telegram(ctx) }, "", true))
+	}
+	return tea.Batch(cmds...)
 }
 
 func (m *model) say(s string) { m.flash, m.flashAt = s, time.Now() }
@@ -230,6 +241,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case entryMsg:
 		root := m.st.Root
 		m.st.Apply(lg.Entry(msg), time.Now())
+		if m.st.ReportNew {
+			m.st.ReportNew, m.summary = false, true
+		}
 		if m.st.Root != root {
 			m.ui.Diffs = map[string]string{}
 			m.filesLoaded = false
@@ -247,6 +261,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case waitsMsg:
 		ping := m.newWaits(msg)
 		m.waits = msg
+		if ping != nil && !m.tgPaired && !m.tgTip && m.connector() != nil && !m.o.Quiet {
+			m.tgTip = true
+			m.say("tip: /connections sends what waits on you to Telegram, with buttons to answer")
+		}
 		if len(m.waits) == 0 && (m.mode == modeAnswer || m.mode == modeNote) {
 			m.mode = modeNormal
 		}
@@ -303,8 +321,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.root == m.st.Root {
 			m.files = msg.files
 		}
+	case tgMsg, tgPollMsg:
+		return m, m.tgUpdate(msg)
 	case tea.PasteMsg:
-		if m.mode == modeQuestions && m.qf != nil {
+		if m.conn != nil {
+			m.connPaste(msg.Content)
+		} else if m.mode == modeQuestions && m.qf != nil {
 			m.qf.paste(msg.Content)
 		} else if m.inputText() && m.picker == nil && !m.ui.Help {
 			m.paste(msg.Content)
@@ -359,6 +381,21 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, cf.yes()
 		case "n", "N", "esc", "q":
 			m.confirm = nil
+		}
+		return m, nil
+	}
+	if m.conn != nil {
+		return m, m.connKey(k)
+	}
+	if m.summary {
+		switch key {
+		case "c":
+			if r := m.st.summaryReport(); r != nil {
+				m.say("summary copied as Markdown")
+				return m, tea.SetClipboard(r.Markdown())
+			}
+		case "esc", "q", "enter":
+			m.summary = false
 		}
 		return m, nil
 	}
@@ -873,6 +910,12 @@ func (m *model) render(now time.Time) string {
 	if m.mode == modeQuestions && m.qf != nil && m.w >= 80 && m.h >= 24 {
 		sc.Overlay = m.qf.box(m.st, min(m.w-8, 100), m.h-4, m.frame)
 	}
+	if m.conn != nil && m.w >= 60 && m.h >= 16 {
+		sc.Overlay = m.connBox(min(m.w-8, 84))
+	}
+	if m.summary && m.w >= 60 && m.h >= 16 {
+		sc.Overlay = m.st.summaryBox(min(m.w-8, 84), m.h-4)
+	}
 	if m.confirm != nil && m.w >= 80 && m.h >= 24 {
 		sc.Overlay = m.confirm.box()
 	}
@@ -903,6 +946,10 @@ func (m *model) footer() string {
 		keys = k("y/⏎", "quit") + k("n/esc", "stay")
 	case m.confirm != nil:
 		keys = k("y/⏎", "yes") + k("n/esc", "no")
+	case m.conn != nil:
+		keys = k("esc", "close")
+	case m.summary:
+		keys = k("c", "copy as Markdown") + k("esc", "close")
 	case m.picker != nil:
 		keys = k("↑↓", "choose") + k("enter", "resume") + k("type", "filter") + k("esc", "close")
 	case m.ui.Help:
@@ -942,6 +989,9 @@ func (m *model) footer() string {
 	text := m.st.Prompt
 	if text == "" {
 		text = "press i to describe what to build"
+	}
+	if m.tgPaired {
+		alert = c("task", "✈ ") + alert
 	}
 	return " " + alert + c("hub!", "› ") + c("mute", fit(firstLine(text), max(20, m.w-110))) + "  " + keys
 }
