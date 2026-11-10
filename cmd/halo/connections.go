@@ -27,6 +27,7 @@ func connectionsCmd(ctx context.Context, args []string) error {
 	pair := fs.Bool("pair", false, "Make a new pairing link (pair another chat).")
 	test := fs.Bool("test", false, "Send a test message.")
 	disconnect := fs.Bool("disconnect", false, "Disconnect the bot (forget its token and chat), to start over.")
+	status := fs.Bool("status", false, "Print the connection and change nothing.")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -48,6 +49,10 @@ func connectionsCmd(ctx context.Context, args []string) error {
 	tg, err := c.Telegram(ctx)
 	if err != nil {
 		return fmt.Errorf("reading the connection from %s: %w", st.Server, err)
+	}
+	if *status {
+		fmt.Print(formatTelegramStatus(*tg, time.Now()))
+		return nil
 	}
 
 	if !tg.Connected {
@@ -123,6 +128,33 @@ stop or message anything, and typed text goes nowhere.
 	fmt.Printf("@%s talks to @%s and sends %s.\n", tg.BotUsername, nonEmptyStr(tg.ChatUsername, "you"), what)
 	fmt.Println("Change it with --level questions|milestones, pair another chat with --pair, start over with --disconnect, or in Lagrange → Settings → Telegram.")
 	return nil
+}
+
+// formatTelegramStatus describes the connection, one fact per line. The pair link is
+// shown only while pairing is pending.
+func formatTelegramStatus(tg client.Telegram, now time.Time) string {
+	var b strings.Builder
+	if !tg.Connected {
+		b.WriteString("connected: no (run halo connections to connect a bot)\n")
+		return b.String()
+	}
+	b.WriteString("connected: yes\n")
+	fmt.Fprintf(&b, "bot: @%s\n", tg.BotUsername)
+	if tg.Paired {
+		fmt.Fprintf(&b, "paired: yes (@%s)\n", nonEmptyStr(tg.ChatUsername, "your chat"))
+	} else {
+		b.WriteString("paired: no\n")
+	}
+	fmt.Fprintf(&b, "level: %s\n", nonEmptyStr(tg.Level, "questions"))
+	if tg.MutedUntil != nil && tg.MutedUntil.After(now) {
+		fmt.Fprintf(&b, "mute: muted until %s\n", tg.MutedUntil.Local().Format("2006-01-02 15:04"))
+	} else {
+		b.WriteString("mute: not muted\n")
+	}
+	if !tg.Paired && tg.PairLink != "" && (tg.PairExpiresAt == nil || tg.PairExpiresAt.After(now)) {
+		fmt.Fprintf(&b, "pair link: %s\n", tg.PairLink)
+	}
+	return b.String()
 }
 
 func readToken() (string, error) {
