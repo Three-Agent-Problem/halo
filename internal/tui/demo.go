@@ -59,7 +59,7 @@ func (d *Demo) Stream(ctx context.Context, fn func(lg.Entry), connected func(boo
 }
 
 // Send implements Backend: the demo ignores the prompt and plays its run.
-func (d *Demo) Send(context.Context, string) (string, error) { return "", nil }
+func (d *Demo) Send(context.Context, string, []string) (string, error) { return "", nil }
 
 // Waiting implements Backend.
 func (d *Demo) Waiting(context.Context) ([]Wait, error) {
@@ -141,7 +141,7 @@ func (d *Demo) Commits(context.Context, string, time.Time) ([]Commit, error) {
 }
 
 // Diff implements Backend.
-func (d *Demo) Diff(_ context.Context, sha string) (string, error) {
+func (d *Demo) Diff(_ context.Context, sha, _ string) (string, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	return d.diffs[sha], nil

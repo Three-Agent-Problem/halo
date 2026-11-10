@@ -110,6 +110,7 @@ type model struct {
 
 func newModel(ctx context.Context, o Options) *model {
 	in := newInput()
+	o.State.Hosted = o.Feed != nil
 	return &model{o: o, st: o.State, ui: NewUI(), input: in, ctx: ctx}
 }
 
@@ -320,12 +321,12 @@ func (m *model) wantDiff() tea.Cmd {
 	if !c.detail || c.sel >= len(m.st.Commits) {
 		return nil
 	}
-	sha := m.st.Commits[c.sel].SHA
+	sha, task := m.st.Commits[c.sel].SHA, m.st.Commits[c.sel].Task
 	if _, ok := m.ui.Diffs[sha]; ok {
 		return nil
 	}
 	return func() tea.Msg {
-		text, err := m.o.Backend.Diff(m.ctx, sha)
+		text, err := m.o.Backend.Diff(m.ctx, sha, task)
 		if err != nil {
 			text = "git show failed: " + err.Error()
 		}
@@ -441,10 +442,10 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			if strings.HasPrefix(text, "/") {
 				return m, m.command(text)
 			}
-			text = m.expandImages(ExpandMentions(text, m.shortMap()))
+			text, images := m.expandImages(ExpandMentions(text, m.shortMap()))
 			m.st.Follow, m.st.Hint = true, ""
 			return m, func() tea.Msg {
-				_, err := m.o.Backend.Send(m.ctx, text)
+				_, err := m.o.Backend.Send(m.ctx, text, images)
 				return doneMsg{"prompt sent to " + m.st.Short(m.st.Lead), err}
 			}
 		}
@@ -472,7 +473,7 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			t := m.msg
 			m.clearInput()
 			m.mode = modeNormal
-			text = m.expandImages(ExpandMentions(text, m.shortMap()))
+			text, _ = m.expandImages(ExpandMentions(text, m.shortMap()))
 			ctx, b, who := m.ctx, m.o.Backend, m.st.Short(t.to) // read here: the cmd runs off the update loop
 			return m, func() tea.Msg {
 				err := b.Message(ctx, t.to, t.sub, text, t.direct)
@@ -514,7 +515,7 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.clearInput()
-			text = m.expandImages(ExpandMentions(text, m.shortMap()))
+			text, _ = m.expandImages(ExpandMentions(text, m.shortMap()))
 			m.mode = modeNormal
 			m.waits = m.waits[1:]
 			return m, func() tea.Msg {

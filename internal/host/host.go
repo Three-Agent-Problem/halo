@@ -20,6 +20,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/a2aproject/a2a-go/v2/integrations/executor/a2aacp"
+	"github.com/three-agent-problem/lagrange/acp"
 	"github.com/three-agent-problem/lagrange/client"
 	"github.com/three-agent-problem/lagrange/delegate"
 	"github.com/three-agent-problem/lagrange/tunnel"
@@ -37,11 +38,14 @@ func (h *Host) agent(handle string, logw io.Writer) a2aacp.Process {
 }
 
 // tap reports every session update of an agent (thoughts, messages, tool calls
-// with their output) to notify, then converts it as usual.
+// with their output) to notify, then converts it with Lagrange's conventions, so
+// tool calls (with input and output), usage and thoughts reach the activity log
+// and a Halo that only watches sees them too.
 func (h *Host) tap(handle string) a2aacp.Converter {
+	conv := acp.Converter(nil, acp.Options{Thoughts: true})
 	return a2aacp.ConverterFunc(func(ctx context.Context, ec *a2asrv.ExecutorContext, u a2aacp.Update) (*a2aacp.ConverterResult, error) {
 		h.notify(Event{Kind: "acp", Agent: handle, Text: u.Type, Task: string(ec.TaskID), Context: ec.ContextID, Data: append(json.RawMessage(nil), u.Raw...)})
-		return a2aacp.ConvertUpdate(ctx, ec, u)
+		return conv.Convert(ctx, ec, u)
 	})
 }
 
@@ -279,7 +283,19 @@ func (m meta) asMap() map[string]any {
 	if m.Direct {
 		out["direct"] = true
 	}
-	return map[string]any{"halo": out}
+	res := map[string]any{"halo": out}
+	// Tags are what the activity log keeps, so any Lagrange client (a watch-only
+	// Halo, the web app) can tie the task to its run and subtask.
+	tags := map[string]any{}
+	for k, v := range map[string]string{"run": m.Run, "subtask": m.Subtask} {
+		if v != "" {
+			tags[k] = v
+		}
+	}
+	if len(tags) > 0 {
+		res[delegate.TagsKey] = tags
+	}
+	return res
 }
 
 func metaOf(msg *a2a.Message) meta {

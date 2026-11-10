@@ -135,6 +135,7 @@ Once every subtask is merged, Halo merges `halo/<run>` into the branch you start
 
 - **The agents run Claude Code without asking per tool call.** Workers may do anything inside their own worktree. The lead and the reviewer can't edit files. The worktrees live outside your repo, in `~/Library/Caches/halo/<repo>-<hash>/`.
 - **One team, one host.** The team is global (`~/Library/Application Support/halo/roster.yaml`, edited in panel 7). A `halo.yaml` in a repository overrides it for that repository only. If the team is already online in another Halo, this one opens watch-only. `halo -watch` watches on purpose, and `halo agents` runs the team headless on another machine.
+- **Watching from elsewhere.** Everything but the shells panel comes through Lagrange: tool calls with their output, thoughts, costs, commits and their diffs. So a watch-only Halo on another machine sees what the host sees.
 - **Runs persist.** `/resume` reopens any past run with its whole history, and your next prompt continues that conversation, so the lead remembers it, even across restarts.
 - **Cost.** Every agent is a real Claude Code session on your account. The roster shows each one's cost (Claude Code's estimate at API prices).
 

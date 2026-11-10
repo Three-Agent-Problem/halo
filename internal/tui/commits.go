@@ -20,6 +20,7 @@ type Commit struct {
 	Files, Add, Del            int
 	Sub                        string   // the subtask, from the subject ("halo: S2 …")
 	Parents                    []string // parent SHAs, first parent first
+	Task                       string   // the task that published it to Lagrange, if one did
 }
 
 // Short is the abbreviated SHA.
@@ -43,6 +44,14 @@ func (s *State) SetCommits(cs []Commit) {
 	for _, c := range cs {
 		if !seen[c.SHA] {
 			s.Commits, seen[c.SHA], added = append(s.Commits, c), true, true
+			continue
+		}
+		if c.Task != "" { // git found it first: remember where its diff lives too
+			for i := range s.Commits {
+				if s.Commits[i].SHA == c.SHA && s.Commits[i].Task == "" {
+					s.Commits[i].Task = c.Task
+				}
+			}
 		}
 	}
 	if added {

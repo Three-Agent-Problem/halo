@@ -139,6 +139,10 @@ type State struct {
 	Plan      *plan.Plan
 	planArt   string
 	Follow    bool
+	// Hosted is set when this Halo hosts the team: the agents' raw output comes
+	// through Feed, so the activity log's copy of it is skipped.
+	Hosted     bool
+	thoughtArt map[string]bool
 
 	Comms   []Comm
 	Commits []Commit
@@ -238,6 +242,10 @@ func (s *State) Apply(e lg.Entry, now time.Time) {
 		}
 		return
 	}
+	if e.Kind == "usage" {
+		s.usageFromLog(e) // the roster counts every run
+		return
+	}
 	if e.Kind == "task" && e.TaskID != "" && e.ParentTaskID == "" && e.Sender == s.Human && e.Recipient == s.Lead &&
 		s.Tasks[e.TaskID] == nil && (s.Root == "" || s.Follow) && (s.Pin == "" || s.Pin == e.TaskID) {
 		s.startRun(e, now)
@@ -251,6 +259,7 @@ func (s *State) Apply(e lg.Entry, now time.Time) {
 	switch e.Kind {
 	case "task":
 		s.task(e, now, live)
+		s.toolFromLog(e)
 	case "artifact":
 		s.artifact(e, now, live)
 	case "input":
@@ -267,8 +276,8 @@ func (s *State) Apply(e lg.Entry, now time.Time) {
 	case "message":
 		// A call that got a plain message back: the question and the answer at once.
 		kind := "ask"
-		s.comm(now, kind, e.Sender, e.Recipient, nonEmpty(e.Str("request"), e.Summary), plan.ParseTag(e.Summary))
-		s.comm(now, "reply", e.Recipient, e.Sender, nonEmpty(e.Str("replyContent"), e.Str("reply")), plan.ParseTag(e.Summary))
+		s.comm(now, kind, e.Sender, e.Recipient, nonEmpty(e.Str("request"), e.Summary), subOf(e))
+		s.comm(now, "reply", e.Recipient, e.Sender, nonEmpty(e.Str("replyContent"), e.Str("reply")), subOf(e))
 		s.Questions++
 		if live {
 			s.packet(e.Sender, e.Recipient, kind, "?", now)
@@ -347,7 +356,7 @@ func (s *State) task(e lg.Entry, now time.Time, live bool) {
 	first := t == nil
 	if first {
 		t = &Task{ID: e.TaskID, Parent: e.ParentTaskID, Sender: e.Sender, Recipient: e.Recipient, Summary: e.Summary,
-			Sub: plan.ParseTag(e.Summary), Started: now, answer: map[string]*strings.Builder{}}
+			Sub: subOf(e), Started: now, answer: map[string]*strings.Builder{}}
 		t.Kind = s.kindOf(e.Sender, e.Recipient)
 		if t.Sub == "" && t.Kind == "ask" && e.Recipient == s.Lead {
 			if parent := s.Tasks[e.ParentTaskID]; parent != nil {
@@ -488,6 +497,18 @@ func (s *State) artifact(e lg.Entry, now time.Time, live bool) {
 		}
 		return
 	}
+	if s.commitFromLog(e, t) {
+		return
+	}
+	if e.Summary == "thoughts" || s.thoughtArt[id] {
+		if s.thoughtArt == nil {
+			s.thoughtArt = map[string]bool{}
+		}
+		s.thoughtArt[id] = true
+		s.chunkFromLog(e, "agent_thought_chunk", e.Str("content"))
+		return
+	}
+	s.chunkFromLog(e, "agent_message_chunk", e.Str("content"))
 	b := t.answer[id]
 	if b == nil || !e.Bool("append") {
 		if b == nil {
@@ -678,4 +699,15 @@ func nonEmpty(v ...string) string {
 		}
 	}
 	return ""
+}
+
+// subOf is the subtask an entry is about: its subtask tag, or (in logs from before
+// tags) a "[S3] " prefix of its summary.
+func subOf(e lg.Entry) string {
+	if t, ok := e.Data["tags"].(map[string]any); ok {
+		if s, ok := t["subtask"].(string); ok && s != "" {
+			return s
+		}
+	}
+	return plan.ParseTag(e.Summary)
 }

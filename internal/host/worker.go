@@ -12,6 +12,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/a2aproject/a2a-go/v2/integrations/executor/a2aacp"
+	"github.com/three-agent-problem/lagrange/code"
 	"github.com/three-agent-problem/lagrange/delegate"
 
 	"github.com/three-agent-problem/halo/internal/config"
@@ -79,6 +80,16 @@ func (w *worker) Execute(ctx context.Context, ec *a2asrv.ExecutorContext) iter.S
 			if err == nil && completed(ev) && m.Worktree != "" && w.agent.Role == config.RoleWorker {
 				stat, cerr := commitAll(ctx, m.Worktree, "halo: "+m.Subtask+" "+m.Title)
 				w.h.log.Info("commit", "agent", w.handle, "subtask", m.Subtask, "stat", stat, "error", cerr)
+				if cerr == nil && stat != "" {
+					// The commit goes to Lagrange as an artifact of the task, so every
+					// client sees it (and its diff), not only this machine.
+					if c, patch, gerr := code.FromGit(ctx, m.Worktree, "HEAD"); gerr == nil {
+						c.Branch = m.Branch
+						if !yield(code.Event(ec, c, patch), nil) {
+							return
+						}
+					}
+				}
 			}
 			if !yield(ev, err) {
 				return

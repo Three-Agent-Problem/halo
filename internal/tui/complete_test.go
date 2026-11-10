@@ -123,7 +123,7 @@ type sendBackend struct {
 	files []string
 }
 
-func (b *sendBackend) Send(_ context.Context, text string) (string, error) {
+func (b *sendBackend) Send(_ context.Context, text string, _ []string) (string, error) {
 	b.sent = text
 	return "", nil
 }

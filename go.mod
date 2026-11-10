@@ -10,7 +10,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/google/jsonschema-go v0.4.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/three-agent-problem/lagrange v0.0.0-20261102084414-50f8b2df814b
+	github.com/three-agent-problem/lagrange v0.0.0-20261110014416-ef1fdf60c1bc
 	gopkg.in/yaml.v3 v3.0.1
 )
 

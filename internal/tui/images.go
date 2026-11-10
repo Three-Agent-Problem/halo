@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -88,12 +89,18 @@ func (m *model) chip(path, name string) {
 	m.popSel, m.popOff = 0, false
 }
 
-// expandImages turns the chips in text into the paths the agents read.
-func (m *model) expandImages(text string) string {
+// expandImages turns the chips in text into the paths the agents read, and
+// returns the images it names, which are attached too.
+func (m *model) expandImages(text string) (string, []string) {
+	var used []string
 	for chip, path := range m.images {
-		text = strings.ReplaceAll(text, chip, "(image: "+path+"; open it with the Read tool)")
+		if strings.Contains(text, chip) {
+			used = append(used, path)
+			text = strings.ReplaceAll(text, chip, "(image: "+path+"; open it with the Read tool)")
+		}
 	}
-	return text
+	sort.Strings(used)
+	return text, used
 }
 
 func copyFile(src, dst string) error {

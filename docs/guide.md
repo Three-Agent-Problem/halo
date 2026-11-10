@@ -83,7 +83,7 @@ Halo acts as you on Lagrange, so it needs one of your keys.
 
 ![Settings → API keys](screenshots/lagrange-api-keys.png)
 
-> Have the `lagrange` CLI? `lagrange login --server http://localhost:8080` does this through the browser, and Halo picks up that login by itself, so you can skip pasting.
+> Have the `lagrange` CLI? `lagrange login --server http://localhost:8080` does this through the browser, and Halo picks up that login by itself, so you can skip pasting. On a machine without a browser, `lagrange login --server http://localhost:8080 --email you@example.com` asks for your password instead.
 
 ✅ **You should see:** a key starting with `lgk_` on your clipboard.
 

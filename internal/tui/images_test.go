@@ -37,11 +37,12 @@ func TestImagePath(t *testing.T) {
 
 type sendRec struct {
 	*Demo
-	sent string
+	sent   string
+	images []string
 }
 
-func (s *sendRec) Send(_ context.Context, text string) (string, error) {
-	s.sent = text
+func (s *sendRec) Send(_ context.Context, text string, images []string) (string, error) {
+	s.sent, s.images = text, images
 	return "root", nil
 }
 
@@ -74,5 +75,8 @@ func TestImageChipInPrompt(t *testing.T) {
 	}
 	if want := "fix this (image: " + copied[0] + "; open it with the Read tool)"; rec.sent != want {
 		t.Fatalf("sent %q\nwant %q", rec.sent, want)
+	}
+	if len(rec.images) != 1 || rec.images[0] != copied[0] {
+		t.Fatalf("attached %v", rec.images)
 	}
 }

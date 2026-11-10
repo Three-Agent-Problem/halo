@@ -432,7 +432,7 @@ func (r *run) delegate(ctx context.Context, id, extra string) (*mcp.CallToolResu
 	if err != nil {
 		return nil, out{}, err
 	}
-	text := plan.Tag(sid) + title + "\n\n" + spec + "\n\nAcceptance: " + acc
+	text := "Subtask " + sid + ": " + title + "\n\n" + spec + "\n\nAcceptance: " + acc
 	if len(merged) > 0 {
 		text += "\n\nAlready merged into your starting point: " + strings.Join(merged, "; ") + "."
 	}
@@ -526,7 +526,7 @@ func (r *run) followUp(ctx context.Context, id, message string) (*mcp.CallToolRe
 	h.busy[rt.worker]++
 	h.mu.Unlock()
 	m := meta{Run: r.id, Subtask: sid, Title: title, Worktree: rt.dir, Branch: rt.branch, Session: rt.session}
-	task, err := r.send(ctx, rt.worker, "↺ "+plan.Tag(sid)+message, m)
+	task, err := r.send(ctx, rt.worker, "↺ "+message, m)
 	if err != nil {
 		h.release(rt.worker)
 		return nil, out{}, err
@@ -560,7 +560,7 @@ func (r *run) requestReview(ctx context.Context, id string) (*mcp.CallToolResult
 	r.mu.Unlock()
 	reviewer := h.handle(h.cfg.Reviewer())
 	d := diff(ctx, h.cfg.Repo, runBranch, rt.branch, 24000)
-	text := plan.Tag(sid) + "Review: " + title + "\n\nSpec: " + spec + "\n\nAcceptance: " + acc +
+	text := "Review of subtask " + sid + ": " + title + "\n\nSpec: " + spec + "\n\nAcceptance: " + acc +
 		"\n\nYour directory is the subtask's worktree (branch " + rt.branch + "). Its diff against the run branch:\n\n" + d
 	m := meta{Run: r.id, Subtask: sid, Title: title, Worktree: rt.dir, Branch: rt.branch, Session: fmt.Sprintf("review/%s/%s/%d", r.short, sid, round)}
 	task, err := r.send(ctx, reviewer, text, m)

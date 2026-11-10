@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/three-agent-problem/lagrange/client"
+	"github.com/three-agent-problem/lagrange/code"
 
 	"github.com/three-agent-problem/halo/internal/ask"
 	"github.com/three-agent-problem/halo/internal/lg"
@@ -31,8 +34,9 @@ type Wait struct {
 type Backend interface {
 	// Stream calls fn for each activity entry until ctx ends.
 	Stream(ctx context.Context, fn func(lg.Entry), connected func(bool, error)) error
-	// Send starts a run: a prompt to the lead. It returns the root task ID.
-	Send(ctx context.Context, text string) (string, error)
+	// Send starts a run: a prompt to the lead, with images (files on this machine)
+	// attached. It returns the root task ID.
+	Send(ctx context.Context, text string, images []string) (string, error)
 	// Waiting lists the tasks waiting on you, oldest first.
 	Waiting(ctx context.Context) ([]Wait, error)
 	// Answer answers a waiting task; decision is "approve", "reject" or "".
@@ -43,8 +47,9 @@ type Backend interface {
 	Online(ctx context.Context, handles []string) ([]string, error)
 	// Commits lists the commits of run short since it started.
 	Commits(ctx context.Context, short string, since time.Time) ([]Commit, error)
-	// Diff returns a commit's git show output.
-	Diff(ctx context.Context, sha string) (string, error)
+	// Diff returns a commit's git show output. task, if set, is the task that
+	// published the commit to Lagrange, which has its patch when git doesn't.
+	Diff(ctx context.Context, sha, task string) (string, error)
 	// Runs lists your runs with the lead, newest first.
 	Runs(ctx context.Context) ([]RunInfo, error)
 	// History returns the activity log so far, oldest first.
@@ -64,7 +69,9 @@ type Backend interface {
 
 // RunInfo is a past run, for /resume.
 type RunInfo struct {
-	ID, Title, State string
+	ID, ContextID    string
+	Title, State     string
+	Cost             float64 // what the run's agents reported spending
 	Tasks            int
 	Started, Updated time.Time
 }
@@ -81,8 +88,13 @@ type Live struct {
 	Token func() string
 	c     *client.Client
 	mu    sync.Mutex
-	root  string // the run whose conversation prompts continue
+	root  string            // the run whose conversation prompts continue
+	ctxOf map[string]string // a run's root task -> its A2A context
 }
+
+// maxAttach caps the images sent with a prompt, in bytes; the API takes 8 MB in
+// all, base64 included. Images past it go as paths only.
+const maxAttach = 5 << 20
 
 func (l *Live) client() *client.Client {
 	if l.c == nil {
@@ -97,24 +109,49 @@ func (l *Live) Stream(ctx context.Context, fn func(lg.Entry), connected func(boo
 }
 
 // Send implements Backend.
-func (l *Live) Send(ctx context.Context, text string) (string, error) {
+func (l *Live) Send(ctx context.Context, text string, images []string) (string, error) {
 	send := &client.Send{To: l.Lead, Text: text}
+	// The images go as A2A file parts, so the lead sees them wherever it runs; the
+	// text keeps their paths for agents on this machine.
+	size := 0
+	for _, p := range images {
+		b, err := os.ReadFile(p)
+		if err != nil || size+len(b) > maxAttach {
+			continue
+		}
+		size += len(b)
+		send.Files = append(send.Files, client.File{Name: filepath.Base(p), Data: b})
+	}
 	l.mu.Lock()
-	root := l.root
+	root, cx := l.root, l.ctxOf[l.root]
 	l.mu.Unlock()
-	if root != "" {
+	if root != "" && cx == "" {
 		if t, err := l.client().Task(ctx, root); err == nil {
-			send.ContextID = t.ContextID
+			cx = t.ContextID
 		}
 	}
+	send.ContextID = cx
 	res, err := l.client().Send(ctx, send)
 	if err != nil {
 		return "", err
 	}
 	if res.Task != nil {
+		l.remember(string(res.Task.ID), res.Task.ContextID)
 		return string(res.Task.ID), nil
 	}
 	return "", nil
+}
+
+func (l *Live) remember(root, contextID string) {
+	if root == "" || contextID == "" {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.ctxOf == nil {
+		l.ctxOf = map[string]string{}
+	}
+	l.ctxOf[root] = contextID
 }
 
 // Waiting implements Backend.
@@ -175,8 +212,50 @@ func (l *Live) Commits(ctx context.Context, short string, since time.Time) ([]Co
 }
 
 // Diff implements Backend.
-func (l *Live) Diff(ctx context.Context, sha string) (string, error) {
-	return GitShow(ctx, l.Repo, sha)
+func (l *Live) Diff(ctx context.Context, sha, task string) (string, error) {
+	out, err := "", errors.New("no repository here")
+	if l.Repo != "" {
+		out, err = GitShow(ctx, l.Repo, sha)
+	}
+	if err == nil || task == "" {
+		return out, err
+	}
+	// Not in this machine's repository (a watch-only Halo elsewhere, a branch that
+	// is gone): the patch the agent published with the commit.
+	t, terr := l.client().Task(ctx, task)
+	if terr != nil || t.Task == nil {
+		return "", err
+	}
+	for _, a := range t.Task.Artifacts {
+		if c, patch, ok := code.Find(a.Parts); ok && c.SHA == sha {
+			return commitShow(c, patch), nil
+		}
+	}
+	return "", err
+}
+
+// commitShow lays out a published commit like git show.
+func commitShow(c code.Commit, patch string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "commit %s\n", c.SHA)
+	if c.Author != "" {
+		fmt.Fprintf(&b, "Author: %s\n", c.Author)
+	}
+	if !c.At.IsZero() {
+		fmt.Fprintf(&b, "Date:   %s\n", c.At.Format(time.RFC1123Z))
+	}
+	fmt.Fprintf(&b, "\n    %s\n", c.Subject)
+	for _, l := range strings.Split(c.Body, "\n") {
+		if l != "" {
+			fmt.Fprintf(&b, "    %s\n", l)
+		}
+	}
+	b.WriteString("\n")
+	b.WriteString(patch)
+	if c.PatchCut {
+		b.WriteString("\n… (the patch was cut)\n")
+	}
+	return b.String()
 }
 
 // Runs implements Backend.
@@ -190,7 +269,8 @@ func (l *Live) Runs(ctx context.Context) ([]RunInfo, error) {
 		if r.Starter != l.Human {
 			continue
 		}
-		out = append(out, RunInfo{ID: r.ID, Title: r.Title, State: r.State, Tasks: r.Tasks, Started: r.StartedAt, Updated: r.UpdatedAt})
+		out = append(out, RunInfo{ID: r.ID, ContextID: r.ContextID, Title: r.Title, State: r.State, Tasks: r.Tasks, Started: r.StartedAt, Updated: r.UpdatedAt, Cost: r.Cost})
+		l.remember(r.ID, r.ContextID)
 	}
 	return out, nil
 }

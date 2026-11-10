@@ -57,7 +57,7 @@ func syncDemo(m *model, d *Demo) {
 	cs, _ := d.Commits(context.Background(), "", time.Time{})
 	m.st.SetCommits(cs)
 	for _, c := range cs {
-		m.ui.Diffs[c.SHA], _ = d.Diff(context.Background(), c.SHA)
+		m.ui.Diffs[c.SHA], _ = d.Diff(context.Background(), c.SHA, "")
 	}
 	m.st.Shells, _ = d.Shells(context.Background())
 	for _, sh := range m.st.Shells {
