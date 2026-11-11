@@ -42,8 +42,11 @@ func (h *Host) agent(a config.Agent, logw io.Writer) a2aacp.Process {
 // with their output) to notify, then converts it with Lagrange's conventions, so
 // tool calls (with input and output), usage and thoughts reach the activity log
 // and a Halo that only watches sees them too.
-func (h *Host) tap(handle string) a2aacp.Converter {
-	conv := acp.Converter(nil, acp.Options{Thoughts: true})
+//
+// session, when set, names the Claude session a task runs in, so Lagrange counts a
+// session's cost once although its tasks arrive in different A2A contexts.
+func (h *Host) tap(handle string, session func(context.Context, *a2asrv.ExecutorContext) string) a2aacp.Converter {
+	conv := acp.Converter(nil, acp.Options{Thoughts: true, Session: session})
 	return a2aacp.ConverterFunc(func(ctx context.Context, ec *a2asrv.ExecutorContext, u a2aacp.Update) (*a2aacp.ConverterResult, error) {
 		h.notify(Event{Kind: "acp", Agent: handle, Text: u.Type, Task: string(ec.TaskID), Context: ec.ContextID, Data: append(json.RawMessage(nil), u.Raw...)})
 		return conv.Convert(ctx, ec, u)

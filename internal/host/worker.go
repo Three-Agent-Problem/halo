@@ -46,7 +46,9 @@ func (h *Host) newWorker(ctx context.Context, a config.Agent, logw io.Writer) (*
 		rules = a2aacp.ToolRules{Allow: []string{"*"}, Deny: []string{"edit", "delete", "move"}}
 	}
 	exec, err := a2aacp.NewExecutor(ctx, h.agent(a, logw), &a2aacp.Config{
-		Converter:  h.tap(w.handle),
+		// A worker continues a subtask's session across contexts (follow-ups, peer
+		// questions): usage reports name it, so its cost isn't counted again.
+		Converter:  h.tap(w.handle, func(_ context.Context, ec *a2asrv.ExecutorContext) string { return w.keyOf(ec.ContextID) }),
 		AutoAnswer: rules,
 		Settings: func(context.Context, *a2asrv.ExecutorContext) (map[string]any, error) {
 			return map[string]any{"model": a.Model}, nil

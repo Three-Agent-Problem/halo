@@ -81,8 +81,8 @@ github.com/stretchr/testify v1.3.0/go.mod h1:M5WIy9Dh21IEIfnGCwXGc5bZfKNJtfHm1UV
 github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.11.1 h1:7s2iGBzp5EwR7/aIZr8ao5+dra3wiQyKjjFuvgVKu7U=
 github.com/stretchr/testify v1.11.1/go.mod h1:wZwfW3scLgRK+23gO65QZefKpKQRnfz6sD981Nm4B6U=
-github.com/three-agent-problem/lagrange v0.1.0-beta.1.0.20261111214532-ea737a07c741 h1:c2EsXwtfr3aze0sljV6f3K3ohBd53LYUxQdAFXdKXzg=
-github.com/three-agent-problem/lagrange v0.1.0-beta.1.0.20261111214532-ea737a07c741/go.mod h1:RmyW+QLOeKZLQkOOS2qZSQn3ab5ysjM+FJN/uprl0KA=
+github.com/three-agent-problem/lagrange v0.1.0-beta.1.0.20261111224623-3e3da9a459a7 h1:NIClSCmDgwp2zR66WujrReEZtYO/83nePmorL1PJhRo=
+github.com/three-agent-problem/lagrange v0.1.0-beta.1.0.20261111224623-3e3da9a459a7/go.mod h1:RmyW+QLOeKZLQkOOS2qZSQn3ab5ysjM+FJN/uprl0KA=
 github.com/xo/terminfo v1.0.0 h1:2ZpYzqWzyyytjk3TP6aJVDhkMAkc99/1xKQdA3TDTBY=
 github.com/xo/terminfo v1.0.0/go.mod h1:RbqR21r5mrJuqunuUZ/Dhy/avygyECGrLceyNeo4LiM=
 github.com/yosida95/uritemplate/v3 v3.0.2 h1:Ed3Oyj9yrmi9087+NczuL5BwkIc4wvTb5zIM+UJPGz4=

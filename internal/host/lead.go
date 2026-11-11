@@ -55,7 +55,7 @@ func (h *Host) newLead(ctx context.Context, a config.Agent, logw io.Writer) (*le
 	}
 	preface := leadPrompt(l.handle, h.st.Human, workers, h.handle(h.cfg.Reviewer()))
 	exec, err := a2aacp.NewExecutor(ctx, h.agent(a, logw), &a2aacp.Config{
-		Converter: h.tap(l.handle),
+		Converter: h.tap(l.handle, nil), // one session per context
 		// The lead reads and runs commands (git log, tests) but never edits.
 		AutoAnswer: a2aacp.ToolRules{Allow: []string{"*"}, Deny: []string{"edit", "delete", "move"}},
 		Settings: func(context.Context, *a2asrv.ExecutorContext) (map[string]any, error) {
