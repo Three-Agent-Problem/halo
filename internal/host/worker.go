@@ -77,7 +77,7 @@ func (w *worker) Execute(ctx context.Context, ec *a2asrv.ExecutorContext) iter.S
 	inner := w.exec.Execute(ctx, ec)
 	return func(yield func(a2a.Event, error) bool) {
 		for ev, err := range inner {
-			if err == nil && completed(ev) && m.Worktree != "" && w.agent.Role == config.RoleWorker {
+			if err == nil && completed(ev) && commits(m, w.agent.Role) {
 				stat, cerr := commitAll(ctx, m.Worktree, "halo: "+m.Subtask+" "+m.Title)
 				w.h.log.Info("commit", "agent", w.handle, "subtask", m.Subtask, "stat", stat, "error", cerr)
 				if cerr == nil && stat != "" {
@@ -101,6 +101,12 @@ func (w *worker) Execute(ctx context.Context, ec *a2asrv.ExecutorContext) iter.S
 // Cancel implements a2asrv.AgentExecutor.
 func (w *worker) Cancel(ctx context.Context, ec *a2asrv.ExecutorContext) iter.Seq2[a2a.Event, error] {
 	return w.exec.Cancel(ctx, ec)
+}
+
+// commits reports whether a completed turn with meta m commits the worktree: a
+// worker's subtask turn does; an answer to a teammate (ask_peer) doesn't.
+func commits(m meta, role string) bool {
+	return m.Worktree != "" && role == config.RoleWorker && m.Kind != "peer"
 }
 
 func completed(ev a2a.Event) bool {
@@ -144,6 +150,9 @@ func (w *worker) session(_ context.Context, ec *a2asrv.ExecutorContext) (a2aacp.
 func (w *worker) prompt(_ context.Context, ec *a2asrv.ExecutorContext) ([]*a2a.Part, error) {
 	key := w.keyOf(ec.ContextID)
 	m := metaOf(ec.Message)
+	if m.Kind == "peer" {
+		return ec.Message.Parts, nil // a teammate's question to a session that knows its role
+	}
 	w.mu.Lock()
 	first := !w.prefaced[key]
 	w.prefaced[key] = true

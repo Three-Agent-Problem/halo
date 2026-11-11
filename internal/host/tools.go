@@ -82,8 +82,66 @@ func (h *Host) workerMCP() http.Handler {
 				}
 				return ok("%s", ans)
 			})
+		type peerIn struct {
+			Subtask  string `json:"subtask" jsonschema:"the teammate's subtask id from your team context, like S1"`
+			Question string `json:"question" jsonschema:"one specific question about the code that subtask touched"`
+		}
+		mcp.AddTool(s, &mcp.Tool{Name: "ask_peer", Description: "Ask the worker of another subtask in this run about the code it worked on, instead of re-reading it yourself. It answers from its own session in a minute or so. Only works when that subtask isn't running."},
+			func(ctx context.Context, _ *mcp.CallToolRequest, in peerIn) (*mcp.CallToolResult, out, error) {
+				return h.askPeer(ctx, agent, key, in.Subtask, in.Question)
+			})
 		return s
 	}, nil)
+}
+
+// askPeer sends a worker's question to the worker of subtask target, in that
+// subtask's session (which still holds what it read), and returns the answer.
+func (h *Host) askPeer(ctx context.Context, agent, key, target, question string) (*mcp.CallToolResult, out, error) {
+	w := h.workers[agent]
+	if w == nil {
+		return nil, out{}, errors.New("unknown agent")
+	}
+	w.mu.Lock()
+	b := w.work[key]
+	w.mu.Unlock()
+	if b == nil || b.meta.Run == "" {
+		return ok("There is no run for this task, so there are no teammates to ask.")
+	}
+	if h.lead == nil {
+		return ok("There is no lead, so there are no teammates to ask.")
+	}
+	h.lead.mu.Lock()
+	r := h.lead.runs[b.meta.Run]
+	h.lead.mu.Unlock()
+	if r == nil {
+		return ok("The run is gone, so there are no teammates to ask.")
+	}
+	rt, err := r.peerTarget(b.meta.Subtask, target)
+	if err != nil {
+		return ok("%s", err.Error())
+	}
+	target = strings.ToUpper(strings.TrimSpace(target))
+	h.mu.Lock()
+	h.busy[rt.worker]++
+	h.mu.Unlock()
+	defer h.release(rt.worker)
+	m := meta{Kind: "peer", Run: b.meta.Run, Subtask: target, Worktree: rt.dir, Branch: rt.branch, Session: rt.session, From: w.handle}
+	res, err := h.caller(w.handle).Send(ctx, lg.Call{To: rt.worker, Parent: b.platform, Text: peerText(w.handle, b.meta.Subtask, target, question), Meta: m.asMap(), Immediate: true})
+	if err != nil {
+		return nil, out{}, err
+	}
+	t, isTask := res.(*a2a.Task)
+	if !isTask {
+		return ok("@%s on %s: %s", rt.worker, target, lg.Text(res))
+	}
+	state, ans, err := h.await(ctx, string(t.ID))
+	if err != nil {
+		return nil, out{}, err
+	}
+	if state != a2a.TaskStateCompleted {
+		return ok("@%s couldn't answer (%s): %s", rt.worker, state, ans)
+	}
+	return ok("@%s on %s: %s", rt.worker, target, ans)
 }
 
 // ── lead tools ───────────────────────────────────────────────────────────────
@@ -253,6 +311,7 @@ func (h *Host) leadMCP() http.Handler {
 type subRT struct {
 	branch, dir, session, worker string
 	stoppedBy                    string // the person who stopped the current attempt
+	summary                      string // the worker's last completed answer, for teammates' briefs
 }
 
 func (r *run) rt(id string) *subRT {
@@ -430,6 +489,7 @@ func (r *run) delegate(ctx context.Context, id, extra string) (*mcp.CallToolResu
 	s.Attempts++
 	attempt, model, title, spec, acc, sid := s.Attempts, s.Model, s.Title, s.Spec, s.Acceptance, s.ID
 	runBranch := r.branch
+	team := brief(r.plan, r.subs, sid)
 	r.mu.Unlock()
 
 	branch, dir, err := h.wt.subtask(ctx, r.short, runBranch, sid, attempt)
@@ -446,6 +506,9 @@ func (r *run) delegate(ctx context.Context, id, extra string) (*mcp.CallToolResu
 	}
 	if extra != "" {
 		text += "\n\nFrom the lead: " + extra
+	}
+	if team != "" {
+		text += "\n\n" + team
 	}
 	session := fmt.Sprintf("%s/%s/%d", r.short, sid, attempt)
 	m := meta{Run: r.id, Subtask: sid, Title: title, Worktree: dir, Branch: branch, Session: session}
@@ -495,6 +558,9 @@ func (r *run) watchWork(id, worker, task string) {
 // workEnded records how a worker's attempt at subtask id ended and tells the lead.
 func (r *run) workEnded(id, worker string, state a2a.TaskState, text string) {
 	if state == a2a.TaskStateCompleted {
+		r.mu.Lock()
+		r.rt(id).summary = clip(strings.TrimSpace(text), maxSummary)
+		r.mu.Unlock()
 		r.update(id, func(s *plan.Subtask) { s.Status, s.Note = plan.Ready, firstLine(text) })
 		r.push(event{Kind: "subtask_done", Subtask: id, From: "@" + worker, Text: clip(text, 1500), Hint: "request_review, or accept if trivial"})
 		return

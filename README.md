@@ -148,6 +148,8 @@ The lead orchestrates only through MCP tools. Each tool call is a Lagrange task,
 | `request_review` | The reviewer reads the diff. APPROVE merges the subtask into the run branch. CHANGES leads to `follow_up`: the same worker, in the same Claude session, for at most 2 rounds. |
 | `escalate` | Retries a failed subtask one model up. |
 
+Workers have two tools of their own: `ask_lead` (a question that blocks them, answered by the lead) and `ask_peer` (a question to the worker of another subtask, answered from that worker's own Claude session, which still remembers the code it read; only while that subtask isn't running). Every delegated subtask ends with **team context**: the goal, each subtask's state, and what finished teammates reported, so a worker can ask instead of re-reading. `lagrange run <run> --overlap` shows how many tool calls the agents of a run repeated.
+
 Once every subtask is merged, Halo merges `halo/<run>` into the branch you started from. If that fails, `halo merge <run>` retries it later, and `halo merge` on its own lists runs.
 
 All along, the run keeps a **situation report** on its root task (Lagrange's `report` extension): status, progress, what each merged subtask built (model, review rounds, time), wall time, review rounds, escalations, time spent waiting on you, and the diff size. Lagrange's Runs page shows it as a card, Telegram gets its notices (a subtask failed, an escalation, a conflict, landed), and when the run lands the TUI opens it as the run summary. `halo merge` prints it too.
