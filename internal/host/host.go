@@ -95,6 +95,8 @@ type Host struct {
 	// them (when the agent supports session/load).
 	sessions *sessionFile
 	notify   func(Event)
+	// fork asks a copy of a busy worker's session (ask_peer); nil runs claude.
+	fork forkFunc
 
 	mu      sync.Mutex
 	workers map[string]*worker // by handle, the reviewer included

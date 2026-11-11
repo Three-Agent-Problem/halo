@@ -83,65 +83,16 @@ func (h *Host) workerMCP() http.Handler {
 				return ok("%s", ans)
 			})
 		type peerIn struct {
-			Subtask  string `json:"subtask" jsonschema:"the teammate's subtask id from your team context, like S1"`
-			Question string `json:"question" jsonschema:"one specific question about the code that subtask touched"`
+			Subtask  string `json:"subtask,omitempty" jsonschema:"the teammate's subtask id from your team context, like S1; or leave it empty and give about"`
+			About    string `json:"about,omitempty" jsonschema:"a file path (or name) a teammate read or changed: the teammate who touched it last answers"`
+			Question string `json:"question" jsonschema:"one specific question: names, signatures, routes, JSON shapes, decisions"`
 		}
-		mcp.AddTool(s, &mcp.Tool{Name: "ask_peer", Description: "Ask the worker of another subtask in this run about the code it worked on, instead of re-reading it yourself. It answers from its own session in a minute or so. Only works when that subtask isn't running."},
+		mcp.AddTool(s, &mcp.Tool{Name: "ask_peer", Description: "Ask the worker of another subtask in this run about the code it read, wrote or is designing, instead of exploring it yourself (its code may not even be in your worktree yet). Name the subtask, or give a file path and the teammate who touched it answers. Works while the teammate is still busy: a copy of its session answers."},
 			func(ctx context.Context, _ *mcp.CallToolRequest, in peerIn) (*mcp.CallToolResult, out, error) {
-				return h.askPeer(ctx, agent, key, in.Subtask, in.Question)
+				return h.askPeer(ctx, agent, key, in.Subtask, in.About, in.Question)
 			})
 		return s
 	}, nil)
-}
-
-// askPeer sends a worker's question to the worker of subtask target, in that
-// subtask's session (which still holds what it read), and returns the answer.
-func (h *Host) askPeer(ctx context.Context, agent, key, target, question string) (*mcp.CallToolResult, out, error) {
-	w := h.workers[agent]
-	if w == nil {
-		return nil, out{}, errors.New("unknown agent")
-	}
-	w.mu.Lock()
-	b := w.work[key]
-	w.mu.Unlock()
-	if b == nil || b.meta.Run == "" {
-		return ok("There is no run for this task, so there are no teammates to ask.")
-	}
-	if h.lead == nil {
-		return ok("There is no lead, so there are no teammates to ask.")
-	}
-	h.lead.mu.Lock()
-	r := h.lead.runs[b.meta.Run]
-	h.lead.mu.Unlock()
-	if r == nil {
-		return ok("The run is gone, so there are no teammates to ask.")
-	}
-	rt, err := r.peerTarget(b.meta.Subtask, target)
-	if err != nil {
-		return ok("%s", err.Error())
-	}
-	target = strings.ToUpper(strings.TrimSpace(target))
-	h.mu.Lock()
-	h.busy[rt.worker]++
-	h.mu.Unlock()
-	defer h.release(rt.worker)
-	m := meta{Kind: "peer", Run: b.meta.Run, Subtask: target, Worktree: rt.dir, Branch: rt.branch, Session: rt.session, From: w.handle}
-	res, err := h.caller(w.handle).Send(ctx, lg.Call{To: rt.worker, Parent: b.platform, Text: peerText(w.handle, b.meta.Subtask, target, question), Meta: m.asMap(), Immediate: true})
-	if err != nil {
-		return nil, out{}, err
-	}
-	t, isTask := res.(*a2a.Task)
-	if !isTask {
-		return ok("@%s on %s: %s", rt.worker, target, lg.Text(res))
-	}
-	state, ans, err := h.await(ctx, string(t.ID))
-	if err != nil {
-		return nil, out{}, err
-	}
-	if state != a2a.TaskStateCompleted {
-		return ok("@%s couldn't answer (%s): %s", rt.worker, state, ans)
-	}
-	return ok("@%s on %s: %s", rt.worker, target, ans)
 }
 
 // ── lead tools ───────────────────────────────────────────────────────────────
@@ -310,8 +261,9 @@ func (h *Host) leadMCP() http.Handler {
 // subRT is where a subtask's current attempt lives.
 type subRT struct {
 	branch, dir, session, worker string
-	stoppedBy                    string // the person who stopped the current attempt
-	summary                      string // the worker's last completed answer, for teammates' briefs
+	stoppedBy                    string   // the person who stopped the current attempt
+	summary                      string   // the worker's last completed answer, for teammates' briefs
+	tasks                        []string // the platform tasks of the current attempt, for its knowledge
 }
 
 func (r *run) rt(id string) *subRT {
@@ -462,6 +414,7 @@ func (h *Host) release(handle string) {
 
 func (r *run) delegate(ctx context.Context, id, extra string) (*mcp.CallToolResult, out, error) {
 	h := r.l.h
+	know := r.know(ctx)
 	r.mu.Lock()
 	if r.plan == nil || !r.plan.Approved {
 		r.mu.Unlock()
@@ -489,7 +442,7 @@ func (r *run) delegate(ctx context.Context, id, extra string) (*mcp.CallToolResu
 	s.Attempts++
 	attempt, model, title, spec, acc, sid := s.Attempts, s.Model, s.Title, s.Spec, s.Acceptance, s.ID
 	runBranch := r.branch
-	team := brief(r.plan, r.subs, sid)
+	team := brief(r.plan, r.subs, sid, know, time.Now())
 	r.mu.Unlock()
 
 	branch, dir, err := h.wt.subtask(ctx, r.short, runBranch, sid, attempt)
@@ -519,7 +472,7 @@ func (r *run) delegate(ctx context.Context, id, extra string) (*mcp.CallToolResu
 	}
 	r.mu.Lock()
 	rt := r.rt(sid)
-	rt.branch, rt.dir, rt.session, rt.worker = branch, dir, session, worker
+	rt.branch, rt.dir, rt.session, rt.worker, rt.tasks = branch, dir, session, worker, []string{task}
 	r.mu.Unlock()
 	r.update(sid, func(s *plan.Subtask) {
 		s.Status, s.Worker, s.Task, s.Note = plan.Running, worker, task, ""
@@ -606,6 +559,9 @@ func (r *run) followUp(ctx context.Context, id, message string) (*mcp.CallToolRe
 		h.release(rt.worker)
 		return nil, out{}, err
 	}
+	r.mu.Lock()
+	r.rt(sid).tasks = append(r.rt(sid).tasks, task)
+	r.mu.Unlock()
 	r.update(sid, func(s *plan.Subtask) { s.Status, s.Task, s.EndedAt = plan.Running, task, 0 })
 	r.watchWork(sid, rt.worker, task)
 	return ok("Sent to @%s, in the same session. The result arrives through wait_events.", rt.worker)

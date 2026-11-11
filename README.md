@@ -148,7 +148,7 @@ The lead orchestrates only through MCP tools. Each tool call is a Lagrange task,
 | `request_review` | The reviewer reads the diff. APPROVE merges the subtask into the run branch. CHANGES leads to `follow_up`: the same worker, in the same Claude session, for at most 2 rounds. |
 | `escalate` | Retries a failed subtask one model up. |
 
-Workers have two tools of their own: `ask_lead` (a question that blocks them, answered by the lead) and `ask_peer` (a question to the worker of another subtask, answered from that worker's own Claude session, which still remembers the code it read; only while that subtask isn't running). Every delegated subtask ends with **team context**: the goal, each subtask's state, and what finished teammates reported, so a worker can ask instead of re-reading. `lagrange run <run> --overlap` shows how many tool calls the agents of a run repeated.
+Workers have two tools of their own: `ask_lead` (a question that blocks them, answered by the lead) and `ask_peer` (a question to the worker of another subtask, by subtask, or by file path: the teammate that last read or changed it answers; an idle teammate answers in its own Claude session, a busy one through a fork of it (`claude --resume <session> --fork-session`), so it keeps working). Every delegated subtask ends with **team context**: the goal, each subtask's state, and what finished teammates reported, so a worker can ask instead of re-reading. `lagrange run <run> --overlap` shows how many tool calls the agents of a run repeated.
 
 Once every subtask is merged, Halo merges `halo/<run>` into the branch you started from. If that fails, `halo merge <run>` retries it later, and `halo merge` on its own lists runs.
 

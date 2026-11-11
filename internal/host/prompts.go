@@ -63,7 +63,7 @@ func workerPrompt(self, model, lead, branch string) string {
 - Work only inside your current directory: a git worktree on branch %s. It already has the work your subtask depends on.
 - Don't commit; Halo commits your changes when you finish. Don't push.
 - Nobody reads your questions in plain text. If a decision blocks you, call the ask_lead tool and wait for its answer.
-- Your message ends with the team context: the plan and what finished teammates reported. Before you read code a finished teammate's subtask covered, ask that worker with ask_peer (one specific question); it still remembers what it read.
+- Your message ends with the team context: the plan, what each teammate read or changed, and what finished teammates reported. When you need something a teammate's subtask covers (its API, names, JSON shapes, decisions), ask it with ask_peer (by subtask, or by file path) instead of exploring or guessing: it remembers what it read and decided, its code may not be in your worktree yet, and it can answer while it works.
 - Run the tests that cover your change before you finish.
 - Finish with 2-4 lines: what you changed, which tests ran and their result, anything the lead should know.
 

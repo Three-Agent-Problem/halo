@@ -3,6 +3,7 @@ package host
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/three-agent-problem/halo/internal/config"
 	"github.com/three-agent-problem/halo/internal/plan"
@@ -19,7 +20,7 @@ func TestBrief(t *testing.T) {
 		"S2": {summary: "POST /api/device in platform/device.go"},
 		"S3": {summary: "should never show"},
 	}
-	got := brief(p, subs, "S3")
+	got := brief(p, subs, "S3", nil, time.Now())
 	for _, want := range []string{
 		"Goal: device login",
 		"- S1 store: done @w-sonnet",
@@ -36,7 +37,7 @@ func TestBrief(t *testing.T) {
 	if strings.Index(got, "- S2: POST") > strings.Index(got, "- S1: Added") {
 		t.Errorf("newest summary should come first:\n%s", got)
 	}
-	if brief(nil, subs, "S1") != "" {
+	if brief(nil, subs, "S1", nil, time.Now()) != "" {
 		t.Error("no plan, no brief")
 	}
 }
@@ -49,32 +50,12 @@ func TestBriefCap(t *testing.T) {
 		p.Subtasks = append(p.Subtasks, &plan.Subtask{ID: id, Title: "t", Status: plan.Done, EndedAt: int64(i)})
 		subs[id] = &subRT{summary: strings.Repeat("x", maxSummary)}
 	}
-	got := brief(p, subs, "")
+	got := brief(p, subs, "", nil, time.Now())
 	if len(got) > maxBrief {
 		t.Fatalf("brief is %d bytes, cap %d", len(got), maxBrief)
 	}
 	if !strings.Contains(got, "- ST: ") || strings.Contains(got, "- SA: ") {
 		t.Fatalf("the newest summaries should stay and the oldest go:\n%s", got)
-	}
-}
-
-func TestPeerTarget(t *testing.T) {
-	_, r, _ := humanLead(t) // S1 ready on w-opus, S2 running on w-sonnet, S3 pending
-	r.rt("S1").session = "run/S1/1"
-	r.rt("S2").session = "run/S2/1"
-	for _, tc := range []struct{ from, target, want string }{
-		{"S3", "S9", "no subtask S9"},
-		{"S1", "s1", "your own subtask"},
-		{"S1", "S3", "hasn't been worked on"},
-		{"S1", "S2", "busy with S2 (running)"},
-	} {
-		if _, err := r.peerTarget(tc.from, tc.target); err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%s asks %s: %v, want %q", tc.from, tc.target, err, tc.want)
-		}
-	}
-	rt, err := r.peerTarget("S3", "s1")
-	if err != nil || rt.worker != "w-opus" || rt.session != "run/S1/1" {
-		t.Fatalf("S3 asks S1: %+v %v", rt, err)
 	}
 }
 
