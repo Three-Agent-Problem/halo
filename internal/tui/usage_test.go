@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/three-agent-problem/lagrange/acp"
 )
 
 func usageUpdate(t *testing.T, agent, ctx string, used, size int64, cost float64) Update {
@@ -44,5 +46,15 @@ func TestUsagePerSession(t *testing.T) {
 	}
 	if len(st.Agents[w].Feed) != 0 {
 		t.Fatal("usage isn't a transcript block")
+	}
+
+	// Turns' tokens (acp.ReportTokens) add up and leave the context fill alone.
+	for range 2 {
+		raw, _ := json.Marshal(map[string]any{"sessionUpdate": "usage_update", "_meta": map[string]any{acp.TokensMeta: map[string]any{"output": 300, "cacheRead": 20_000}}})
+		st.Feed(Update{Agent: w, Task: "t-c2", Context: "c2", Type: "usage_update", Raw: raw, At: time.Now()})
+	}
+	u = st.Agents[w].Usage
+	if u.Tokens != (acp.Tokens{Output: 600, CacheRead: 40_000}) || u.Used != 160_000 || u.Cost() < .299 {
+		t.Fatalf("after tokens: %+v", u)
 	}
 }

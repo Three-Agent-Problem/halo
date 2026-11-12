@@ -11,7 +11,7 @@ require (
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/google/jsonschema-go v0.4.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/three-agent-problem/lagrange v0.1.0-beta.1.0.20261111224623-3e3da9a459a7
+	github.com/three-agent-problem/lagrange v0.1.0-beta.1.0.20261112082301-c92be7eabd52
 	gopkg.in/yaml.v3 v3.0.1
 	rsc.io/qr v0.2.0
 )
@@ -40,6 +40,7 @@ require (
 	github.com/segmentio/encoding v0.5.4 // indirect
 	github.com/xo/terminfo v1.0.0 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
+	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect

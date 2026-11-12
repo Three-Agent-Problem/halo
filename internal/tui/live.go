@@ -16,6 +16,7 @@ import (
 	"github.com/charmbracelet/x/ansi"
 
 	"github.com/three-agent-problem/halo/internal/shells"
+	"github.com/three-agent-problem/lagrange/acp"
 )
 
 // ── raw agent output ─────────────────────────────────────────────────────────
@@ -71,6 +72,8 @@ type acpUpdate struct {
 	Used int64    `json:"used"`
 	Size int64    `json:"size"`
 	Cost *acpCost `json:"cost"`
+	// Meta carries a turn's tokens (acp.TokensMeta), from acp.ReportTokens.
+	Meta map[string]json.RawMessage `json:"_meta"`
 }
 
 type acpCost struct {
@@ -147,6 +150,12 @@ func (s *State) Feed(u Update) {
 		}
 	case "usage_update":
 		a.usage(u.Context, x.Used, x.Size, x.Cost)
+		if raw, ok := x.Meta[acp.TokensMeta]; ok {
+			var t acp.Tokens
+			if json.Unmarshal(raw, &t) == nil {
+				a.Usage.Tokens.Add(t)
+			}
+		}
 		return
 	case "plan":
 		if b := last(); b != nil && b.Kind == "plan" && b.Task == u.Task {

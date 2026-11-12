@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/three-agent-problem/lagrange/acp"
 )
 
 // Usage is what an agent's Claude Code sessions report through ACP usage
@@ -12,6 +14,8 @@ type Usage struct {
 	Used, Size int64              // tokens in the newest session's context, of its window
 	Sessions   map[string]float64 // A2A context → that session's cost so far, USD
 	Currency   string
+	// Tokens is what the agent's turns read and wrote, summed (acp.ReportTokens).
+	Tokens acp.Tokens
 }
 
 // Cost is the agent's total over its sessions.

@@ -14,6 +14,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/a2aproject/a2a-go/v2/integrations/executor/a2aacp"
+	"github.com/three-agent-problem/lagrange/acp"
 	"github.com/three-agent-problem/lagrange/delegate"
 
 	"github.com/three-agent-problem/halo/internal/config"
@@ -54,7 +55,7 @@ func (h *Host) newLead(ctx context.Context, a config.Agent, logw io.Writer) (*le
 		workers[w.Model] = append(workers[w.Model], "@"+h.handle(w))
 	}
 	preface := leadPrompt(l.handle, h.st.Human, workers, h.handle(h.cfg.Reviewer()))
-	exec, err := a2aacp.NewExecutor(ctx, h.agent(a, logw), &a2aacp.Config{
+	exec, err := a2aacp.NewExecutor(ctx, acp.ReportTokens(h.agent(a, logw)), &a2aacp.Config{
 		Converter: h.tap(l.handle, nil), // one session per context
 		// The lead reads and runs commands (git log, tests) but never edits.
 		AutoAnswer: a2aacp.ToolRules{Allow: []string{"*"}, Deny: []string{"edit", "delete", "move"}},

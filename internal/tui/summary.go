@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/three-agent-problem/lagrange/acp"
+	"github.com/three-agent-problem/lagrange/relay"
 	"github.com/three-agent-problem/lagrange/report"
 )
 
@@ -19,7 +21,9 @@ func (s *State) summaryReport() *report.Report {
 	r := *s.Report
 	r.Stats = append([]report.Stat(nil), r.Stats...)
 	total, currency := 0.0, ""
+	var tokens acp.Tokens
 	for _, a := range s.Agents {
+		tokens.Add(a.Usage.Tokens)
 		total += a.Usage.Cost()
 		if currency == "" {
 			currency = a.Usage.Currency
@@ -31,6 +35,9 @@ func (s *State) summaryReport() *report.Report {
 			v = fmt.Sprintf("%.2f %s", total, currency)
 		}
 		r.Stats = append(r.Stats, report.Stat{Label: "Team cost", Value: v})
+	}
+	if !tokens.IsZero() {
+		r.Stats = append(r.Stats, report.Stat{Label: "Team tokens", Value: relay.TokensText(tokens)})
 	}
 	return &r
 }

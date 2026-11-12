@@ -12,6 +12,7 @@ import (
 	"github.com/a2aproject/a2a-go/v2/a2a"
 	"github.com/a2aproject/a2a-go/v2/a2asrv"
 	"github.com/a2aproject/a2a-go/v2/integrations/executor/a2aacp"
+	"github.com/three-agent-problem/lagrange/acp"
 	"github.com/three-agent-problem/lagrange/code"
 	"github.com/three-agent-problem/lagrange/delegate"
 
@@ -45,7 +46,7 @@ func (h *Host) newWorker(ctx context.Context, a config.Agent, logw io.Writer) (*
 	if a.Role == config.RoleReviewer {
 		rules = a2aacp.ToolRules{Allow: []string{"*"}, Deny: []string{"edit", "delete", "move"}}
 	}
-	exec, err := a2aacp.NewExecutor(ctx, h.agent(a, logw), &a2aacp.Config{
+	exec, err := a2aacp.NewExecutor(ctx, acp.ReportTokens(h.agent(a, logw)), &a2aacp.Config{
 		// A worker continues a subtask's session across contexts (follow-ups, peer
 		// questions): usage reports name it, so its cost isn't counted again.
 		Converter:  h.tap(w.handle, func(_ context.Context, ec *a2asrv.ExecutorContext) string { return w.keyOf(ec.ContextID) }),
