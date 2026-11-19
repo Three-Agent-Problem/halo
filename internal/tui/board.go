@@ -23,7 +23,7 @@ var boardCols = []struct {
 }{
 	{"PENDING", "dim", []string{plan.Pending}},
 	{"RUNNING", "task", []string{plan.Running, plan.Changes}},
-	{"WAITING", "ask", []string{plan.Asking, plan.Ready, plan.Review}},
+	{"WAITING", "ask", []string{plan.Asking, plan.Ready, plan.Review, plan.Paused}},
 	{"DONE", "reply", []string{plan.Done, plan.Failed, plan.Conflict}},
 }
 

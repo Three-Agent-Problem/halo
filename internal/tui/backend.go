@@ -70,6 +70,10 @@ type Backend interface {
 	// StopSubtask stops the worker of a running subtask: its task is canceled and the
 	// lead hears it was on purpose. It fails when the subtask isn't running.
 	StopSubtask(ctx context.Context, subtask string) error
+	// Resume decides about a team paused on Claude's usage limit: "now" continues at
+	// once (say after logging in to another account), "wait" waits for the reset,
+	// "stop" fails what paused. It fails when nothing is paused.
+	Resume(ctx context.Context, mode string) error
 }
 
 // RunInfo is a past run, for /resume.
@@ -352,6 +356,11 @@ const BtwTag = "btw"
 // Halo handles like a human_message.
 func (l *Live) StopSubtask(ctx context.Context, subtask string) error {
 	return l.toLead(ctx, "stop "+subtask, map[string]any{"kind": "stop_subtask", "from": l.Human, "subtask": subtask})
+}
+
+// Resume implements Backend, with Halo's resume metadata.
+func (l *Live) Resume(ctx context.Context, mode string) error {
+	return l.toLead(ctx, mode, map[string]any{"kind": "resume", "from": l.Human})
 }
 
 // toLead sends the lead a message with Halo metadata and returns its refusal

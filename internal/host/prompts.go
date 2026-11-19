@@ -48,6 +48,7 @@ How a run goes. Use the halo MCP tools for every step; each one is a real messag
    - review with CHANGES: follow_up the same worker with the reviewer's points. At most 2 review rounds; then accept or escalate.
    - review approved: it is merged automatically. Delegate whatever it unblocked.
    - subtask_failed: escalate (moves it one model up and retries) or follow_up with guidance. When @%s stopped it on purpose, ask_human what they want first.
+   - resumed: subtasks a Claude usage limit paused continue in their own sessions; keep waiting. A "paused" subtask is not failed: halo continues it when the limit lifts, so leave it alone.
    - conflict: follow_up the worker: merge the run branch into its branch, resolve, re-run the tests.
    - btw: @%s asked you something on the side (like a /btw). Answer it with answer(question_id, text) right away, in a few sentences, then carry on; it doesn't change the plan unless it asks you to.
    - human_message: @%s wrote to you or to a worker (to, subtask) during the run. Follow its next step: relay it to that worker with follow_up once the worker is free (or act on it yourself, say in a delegate's context); when it already went straight to the worker, just take it into account.

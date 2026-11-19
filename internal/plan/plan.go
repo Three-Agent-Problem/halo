@@ -24,6 +24,7 @@ const (
 	Done     = "done"     // merged into the run's branch
 	Failed   = "failed"   // the worker failed; escalate or retry
 	Conflict = "conflict" // merging failed
+	Paused   = "paused"   // Claude's usage limit stopped its worker or reviewer; it continues when the run resumes
 )
 
 // Ladder orders the models from cheapest to strongest.
@@ -46,6 +47,15 @@ type Plan struct {
 	// MergedInto is the base branch the run branch was merged into.
 	MergedInto string     `json:"merged_into,omitempty"`
 	Subtasks   []*Subtask `json:"subtasks"`
+	// Paused is set while Claude's usage limit pauses the run.
+	Paused *Pause `json:"paused,omitempty"`
+}
+
+// Pause is why a run is paused and when it continues.
+type Pause struct {
+	Reason string `json:"reason"`           // Claude's words: "You've hit your 5-hour limit · resets 7:50pm (Europe/Rome)"
+	Resets int64  `json:"resets,omitempty"` // unix ms when the limit resets, if known
+	Since  int64  `json:"since,omitempty"`  // unix ms when the run paused
 }
 
 // Subtask is one piece of the plan.

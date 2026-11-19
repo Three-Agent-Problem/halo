@@ -48,6 +48,8 @@ func (r *run) reportLocked() report.Report {
 		rep.Status = "merge failed"
 	case r.landing == landRunning:
 		rep.Status = "landing"
+	case p.Paused != nil:
+		rep.Status = "paused · Claude usage limit"
 	case !p.Approved:
 		rep.Status = "waiting for approval"
 	case failed > 0:

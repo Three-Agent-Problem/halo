@@ -308,6 +308,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case historyMsg:
 		m.replay(msg)
 		return m, m.fetch()
+	case loginMsg:
+		return m, m.loggedIn(msg)
 	case doneMsg:
 		if msg.err != nil {
 			m.say(msg.what + " failed: " + msg.err.Error())

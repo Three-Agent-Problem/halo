@@ -613,6 +613,12 @@ func (s *State) setPlan(p *plan.Plan, now time.Time) {
 	if p.Approved && !old.Approved {
 		s.comm(now, "hub", "", "", "plan approved · branch "+nonEmpty(p.Branch, "—"))
 	}
+	switch {
+	case p.Paused != nil && old.Paused == nil:
+		s.comm(now, "hub", "", "", "⏸ "+p.Paused.Reason+" · the team is paused, not failed: /continue after /login to another account, or it continues on its own"+resetsAt(p.Paused))
+	case p.Paused == nil && old.Paused != nil:
+		s.comm(now, "hub", "", "", "▶ continuing after the usage limit")
+	}
 	if p.MergedInto != "" && old.MergedInto == "" {
 		s.comm(now, "hub", "", "", "✓ "+nonEmpty(p.Branch, "branch")+" merged into "+p.MergedInto)
 	}

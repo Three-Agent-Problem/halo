@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand/v2"
 	"strings"
@@ -201,6 +202,11 @@ func (d *Demo) Btw(ctx context.Context, root, text string) error {
 			Data:    tags})
 	}()
 	return nil
+}
+
+// Resume implements Backend: the demo never hits a usage limit.
+func (d *Demo) Resume(context.Context, string) error {
+	return errors.New("nothing is paused (the demo never hits a usage limit)")
 }
 
 // StopSubtask implements Backend: the scripted run goes on, but the request shows.

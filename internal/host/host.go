@@ -101,6 +101,12 @@ type Host struct {
 	// fork asks a copy of a busy worker's session (ask_peer); nil runs claude.
 	fork forkFunc
 
+	// limit is the usage limit the team is paused on, if any.
+	limit limiter
+	// limitAsk asks the person about a pause; nil asks through Lagrange. Tests
+	// replace it.
+	limitAsk func(ctx context.Context, r *run, hit limitHit) (string, error)
+
 	mu      sync.Mutex
 	workers map[string]*worker // by handle, the reviewer included
 	busy    map[string]int     // tasks the lead has in flight per worker

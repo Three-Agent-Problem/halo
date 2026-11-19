@@ -530,6 +530,10 @@ func (r *run) workEnded(id, worker string, state a2a.TaskState, text string) {
 			Hint: "don't retry or escalate on your own: ask_human what they want (re-delegate with new context, change the plan, or drop it)"})
 		return
 	}
+	if hit, ok := usageLimit(text, time.Now()); ok && state == a2a.TaskStateFailed {
+		r.pauseSub(id, "work", hit)
+		return
+	}
 	r.update(id, func(s *plan.Subtask) { s.Status, s.Note = plan.Failed, firstLine(nonEmpty(text, string(state))) })
 	r.notice("%s failed on @%s: %s", id, worker, clip(firstLine(nonEmpty(text, string(state))), 200))
 	r.push(event{Kind: "subtask_failed", Subtask: id, From: "@" + worker, Text: clip(nonEmpty(text, string(state)), 1500),
@@ -602,6 +606,10 @@ func (r *run) requestReview(ctx context.Context, id string) (*mcp.CallToolResult
 	go func() {
 		state, verdict, err := h.await(h.ctx, task)
 		if err != nil {
+			return
+		}
+		if hit, ok := usageLimit(verdict, time.Now()); ok && state == a2a.TaskStateFailed {
+			r.pauseSub(sid, "review", hit)
 			return
 		}
 		if state != a2a.TaskStateCompleted {

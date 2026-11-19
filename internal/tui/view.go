@@ -260,6 +260,9 @@ func (s *State) summary(id int, sc Screen) string {
 		if !s.Plan.Approved {
 			out += " · awaiting approval"
 		}
+		if s.Plan.Paused != nil {
+			out += " · ⏸ paused (usage limit" + resetsAt(s.Plan.Paused) + ")"
+		}
 		return out
 	case pCommits:
 		if len(s.Commits) == 0 {
@@ -441,6 +444,8 @@ func (s *State) runState() (string, string) {
 		return "completed", "reply"
 	case s.RootState == stFailed || s.RootState == stRejected || s.RootState == stCanceled:
 		return strings.ToLower(short(s.RootState)), "fail"
+	case s.Plan != nil && s.Plan.Paused != nil:
+		return "⏸ paused · usage limit" + resetsAt(s.Plan.Paused), "ask"
 	case s.Agents[s.Human] != nil && s.Agents[s.Human].State == "working":
 		return "waiting on you", "ask"
 	case s.Plan == nil:
@@ -460,11 +465,11 @@ func live(ok bool) string {
 
 var statusIcon = map[string]string{
 	plan.Pending: "○", plan.Asking: "?", plan.Ready: "◇", plan.Review: "◆", plan.Changes: "↺",
-	plan.Done: "✓", plan.Failed: "✗", plan.Conflict: "✗",
+	plan.Done: "✓", plan.Failed: "✗", plan.Conflict: "✗", plan.Paused: "⏸",
 }
 var statusKey = map[string]string{
 	plan.Pending: "dim", plan.Running: "task", plan.Asking: "ask", plan.Ready: "reply", plan.Review: "review",
-	plan.Changes: "ask", plan.Done: "reply", plan.Failed: "fail", plan.Conflict: "fail",
+	plan.Changes: "ask", plan.Done: "reply", plan.Failed: "fail", plan.Conflict: "fail", plan.Paused: "ask",
 }
 
 func cursor(frame int) string {

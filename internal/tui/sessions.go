@@ -3,12 +3,14 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/three-agent-problem/halo/internal/lg"
+	"github.com/three-agent-problem/halo/internal/plan"
 )
 
 // commands are the slash commands of the prompt.
@@ -20,6 +22,8 @@ var commands = [][2]string{
 	{"/merge", "land the current run on your branch now"},
 	{"/summary", "the run's summary: what it built, what it cost"},
 	{"/connections", "connect Telegram: answer and follow runs from your phone"},
+	{"/continue", "continue a team paused on Claude's usage limit now (/continue wait · /continue stop)"},
+	{"/login", "log in to another Claude account (claude auth login), then continue a paused team"},
 	{"/agents", "edit the team (panel 7)"},
 	{"/help", "every key"},
 }
@@ -40,6 +44,7 @@ type (
 		startup bool
 		err     error
 	}
+	loginMsg   struct{ err error }
 	historyMsg struct {
 		root    string
 		entries []lg.Entry
@@ -110,6 +115,23 @@ func (m *model) command(text string) tea.Cmd {
 		}
 	case "/connections":
 		return m.openConnections()
+	case "/continue":
+		mode := nonEmpty(strings.ToLower(rest), "now")
+		if mode != "now" && mode != "wait" && mode != "stop" {
+			m.say("/continue, /continue wait or /continue stop")
+			return nil
+		}
+		ctx, b := m.ctx, m.o.Backend
+		what := map[string]string{"now": "continuing the paused team", "wait": "the team waits for the reset", "stop": "stopping what paused"}[mode]
+		return func() tea.Msg { return doneMsg{what, b.Resume(ctx, mode)} }
+	case "/login":
+		if m.o.Team == nil {
+			m.say("watch-only: log in on the machine that hosts the team")
+			return nil
+		}
+		// claude keeps its login in the keychain: the agents pick the new one up
+		// when Halo restarts them, which continuing a paused team does.
+		return tea.ExecProcess(exec.Command("claude", "auth", "login"), func(err error) tea.Msg { return loginMsg{err} })
 	case "/agents":
 		m.ui.SetFocus(pRoster)
 	case "/merge":
@@ -273,4 +295,28 @@ func (m *model) startupHint(rs []RunInfo) {
 	r := rs[0]
 	state := strings.ToLower(strings.TrimPrefix(r.State, "TASK_STATE_"))
 	m.st.Hint = fmt.Sprintf("last run “%s” · %s · %s · /resume to reopen it", firstLine(r.Title), state, ago(time.Since(r.Updated)))
+}
+
+// loggedIn continues a team paused on the usage limit, now that claude has a new
+// login; with nothing paused, it says when the agents will use it.
+func (m *model) loggedIn(msg loginMsg) tea.Cmd {
+	if msg.err != nil {
+		m.say("claude auth login failed: " + msg.err.Error())
+		return nil
+	}
+	ctx, b := m.ctx, m.o.Backend
+	return func() tea.Msg {
+		if err := b.Resume(ctx, "now"); err != nil {
+			return doneMsg{"logged in · the agents use the new account from their next restart (a paused team restarts them)", nil}
+		}
+		return doneMsg{"logged in · the paused team continues on the new account", nil}
+	}
+}
+
+// resetsAt is ", resets 19:50" for a pause that knows when, or "".
+func resetsAt(p *plan.Pause) string {
+	if p == nil || p.Resets == 0 {
+		return ""
+	}
+	return ", resets " + time.UnixMilli(p.Resets).Format("15:04")
 }

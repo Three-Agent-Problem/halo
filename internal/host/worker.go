@@ -24,7 +24,7 @@ type worker struct {
 	h      *Host
 	agent  config.Agent
 	handle string
-	exec   *a2aacp.Executor
+	exec   *procs
 
 	mu       sync.Mutex
 	keys     map[string]string   // A2A context -> session key
@@ -46,7 +46,7 @@ func (h *Host) newWorker(ctx context.Context, a config.Agent, logw io.Writer) (*
 	if a.Role == config.RoleReviewer {
 		rules = a2aacp.ToolRules{Allow: []string{"*"}, Deny: []string{"edit", "delete", "move"}}
 	}
-	exec, err := a2aacp.NewExecutor(ctx, acp.ReportTokens(h.agent(a, logw)), &a2aacp.Config{
+	cfg := &a2aacp.Config{
 		// A worker continues a subtask's session across contexts (follow-ups, peer
 		// questions): usage reports name it, so its cost isn't counted again.
 		Converter:  h.tap(w.handle, func(_ context.Context, ec *a2asrv.ExecutorContext) string { return w.keyOf(ec.ContextID) }),
@@ -57,6 +57,9 @@ func (h *Host) newWorker(ctx context.Context, a config.Agent, logw io.Writer) (*
 		Session:      w.session,
 		SessionStore: (*workerSessions)(w),
 		Prompt:       w.prompt,
+	}
+	exec, err := newProcs(func() (agentExec, error) {
+		return a2aacp.NewExecutor(ctx, acp.ReportTokens(h.agent(a, logw)), cfg)
 	})
 	if err != nil {
 		return nil, err

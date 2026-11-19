@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/three-agent-problem/halo/internal/lg"
+	"github.com/three-agent-problem/halo/internal/plan"
+	"github.com/three-agent-problem/lagrange/ask"
 )
 
 func demoState() *State {
@@ -364,6 +366,11 @@ func TestSnapshot(t *testing.T) {
 			time.Sleep(time.Duration(n) * time.Second)
 			mu.Lock()
 			continue
+		case k == "pause":
+			// Claude's usage limit pauses the team: a running subtask waits, and
+			// Halo asks what to do (see host/limit.go).
+			snapPause(m)
+			continue
 		case k == "send":
 			// enter at the prompt: sends what was typed or pasted.
 			_, cmd := m.key(tea.KeyPressMsg{Code: tea.KeyEnter})
@@ -490,4 +497,31 @@ func TestQuitAsks(t *testing.T) {
 	} else if _, ok := cmd().(tea.QuitMsg); !ok {
 		t.Fatal("y should return tea.Quit")
 	}
+}
+
+// snapPause puts the run on screen in the state a usage limit leaves it in.
+func snapPause(m *model) {
+	if m.st.Plan == nil {
+		return
+	}
+	p := *m.st.Plan
+	p.Subtasks = append([]*plan.Subtask(nil), p.Subtasks...)
+	reason := "You've hit your 5-hour limit · resets 7:50pm (Europe/Rome)"
+	for i, st := range p.Subtasks {
+		if st.Status == plan.Running || st.Status == plan.Review {
+			c := *st
+			c.Status, c.Note = plan.Paused, reason
+			p.Subtasks[i] = &c
+		}
+	}
+	resets := time.Now().Add(2*time.Hour + 14*time.Minute)
+	p.Paused = &plan.Pause{Reason: reason, Resets: resets.UnixMilli(), Since: time.Now().UnixMilli()}
+	m.st.setPlan(&p, time.Now())
+	qs := []ask.Question{{Header: "Limit", Question: "Claude's usage limit paused the team (" + reason + "). What now?", Options: []ask.Option{
+		{Label: "Wait for the reset (Recommended)", Description: "the run continues on its own when the limit resets; it resets at " + resets.Format("15:04 Mon")},
+		{Label: "Continue now", Description: "you logged in to another Claude account (/login in Halo, or claude auth login): Halo restarts the agents and they carry on"},
+		{Label: "Stop the run", Description: "what paused fails, and the lead asks you what next once Claude works again"},
+	}}}
+	m.waits = append([]Wait{{TaskID: "limit", Asker: m.st.Lead, Since: time.Now(), Questions: qs,
+		Question: "⏸ " + reason + "\n\nThe team is paused, not failed: every agent keeps its session and worktree."}}, m.waits...)
 }

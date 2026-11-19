@@ -180,6 +180,20 @@ Type `/connections` in the TUI (or run `halo connections`) and follow the three 
 
 ✅ **You should see:** "✓ paired" in the dialog, a test message in Telegram, and `✈` in the footer. From then on the lead's questions and the plan approval arrive in Telegram with buttons, and the run summary arrives when the run lands. The bot can only press those buttons and show status (`/status`, `/waiting`, `/runs`): it can't start or stop anything.
 
+## When Claude's usage limit hits
+
+Halo pauses the run instead of failing it. Every agent keeps its Claude session and worktree, and paused subtasks show `⏸` on the board. Halo asks you what to do (in the TUI, and in Telegram if you connected it):
+
+![A run paused on the usage limit](screenshots/pause.png)
+
+- **Wait for the reset** (the default if you don't answer): the run continues on its own a minute after the limit resets.
+- **Continue now**: use this after you log in to another Claude account. Type `/login` in Halo (it runs `claude auth login` and then continues the team), or log in somewhere else and type `/continue`.
+- **Stop the run**: what paused fails, and the lead asks you what next.
+
+Before continuing, Halo restarts the agents' processes, because a running `claude` keeps the login it started with. They load their sessions again and pick up where they stopped. `/continue wait` and `/continue stop` answer the question from the prompt.
+
+If you quit Halo while it is paused, the run's state is lost (Halo keeps it in memory). The conversations survive, so `/resume` the run and tell the lead which worktrees to carry on in.
+
 ---
 
 ## When something's off

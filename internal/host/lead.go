@@ -32,7 +32,7 @@ type lead struct {
 	h      *Host
 	agent  config.Agent
 	handle string
-	exec   *a2aacp.Executor
+	exec   *procs
 
 	mu    sync.Mutex
 	runs  map[string]*run   // by root platform task
@@ -55,7 +55,7 @@ func (h *Host) newLead(ctx context.Context, a config.Agent, logw io.Writer) (*le
 		workers[w.Model] = append(workers[w.Model], "@"+h.handle(w))
 	}
 	preface := leadPrompt(l.handle, h.st.Human, workers, h.handle(h.cfg.Reviewer()))
-	exec, err := a2aacp.NewExecutor(ctx, acp.ReportTokens(h.agent(a, logw)), &a2aacp.Config{
+	cfg := &a2aacp.Config{
 		Converter: h.tap(l.handle, nil), // one session per context
 		// The lead reads and runs commands (git log, tests) but never edits.
 		AutoAnswer: a2aacp.ToolRules{Allow: []string{"*"}, Deny: []string{"edit", "delete", "move"}},
@@ -74,6 +74,9 @@ func (h *Host) newLead(ctx context.Context, a config.Agent, logw io.Writer) (*le
 			}
 			return append([]*a2a.Part{a2a.NewTextPart(preface + "\n\nThe request:\n")}, ec.Message.Parts...), nil
 		},
+	}
+	exec, err := newProcs(func() (agentExec, error) {
+		return a2aacp.NewExecutor(ctx, acp.ReportTokens(h.agent(a, logw)), cfg)
 	})
 	if err != nil {
 		return nil, err
@@ -93,47 +96,96 @@ func (l *lead) Execute(ctx context.Context, ec *a2asrv.ExecutorContext) iter.Seq
 		return l.btw(ctx, ec, m)
 	case "stop_subtask":
 		return l.stopSubtask(ctx, ec, m)
+	case "resume":
+		return l.resume(ec)
 	}
 	r := l.runFor(ctx, ec)
-	inner := l.exec.Execute(ctx, ec)
 	return func(yield func(a2a.Event, error) bool) {
-		ctx, cancel := context.WithCancel(ctx)
-		defer cancel()
-		type item struct {
-			ev  a2a.Event
-			err error
-		}
-		evs := make(chan item)
-		go func() {
-			defer close(evs)
-			for ev, err := range inner {
-				select {
-				case evs <- item{ev, err}:
-				case <-ctx.Done():
-					return
-				}
-			}
-		}()
 		emit := r.attach(ec)
 		defer r.detach()
-		done := false
+		cur := ec
 		for {
+			held, hit, limited := l.turn(ctx, cur, emit, yield)
+			if !limited {
+				return
+			}
+			// Claude's usage limit stopped the turn: the run pauses instead of failing.
+			wait := make(chan resumption, 1)
+			r.mu.Lock()
+			r.leadWait = wait
+			r.mu.Unlock()
+			l.h.hitLimit(r, hit)
+			msg := a2a.NewMessageForTask(a2a.MessageRoleAgent, ec, a2a.NewTextPart("⏸ Paused: "+hit.Text+". Waiting to continue."))
+			if !yield(a2a.NewStatusUpdateEvent(ec, a2a.TaskStateWorking, msg), nil) {
+				return
+			}
+			var res resumption
+		waiting:
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case res = <-wait:
+					break waiting
+				case ev := <-emit:
+					if !yield(ev, nil) {
+						return
+					}
+				}
+			}
+			if res.mode == resumeStop {
+				yield(held, nil)
+				return
+			}
+			cur = continued(ec, resumeLead(res.mode, res.hit, res.ids, r.statusText()))
+		}
+	}
+}
+
+// turn runs one Claude turn of the lead and forwards its events, and the plan
+// updates meanwhile, until it ends. A turn that Claude's usage limit stopped
+// doesn't end the run: its failure is held back and returned with limited set.
+func (l *lead) turn(ctx context.Context, ec *a2asrv.ExecutorContext, emit <-chan a2a.Event, yield func(a2a.Event, error) bool) (held a2a.Event, hit limitHit, limited bool) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	inner := l.exec.Execute(ctx, ec)
+	type item struct {
+		ev  a2a.Event
+		err error
+	}
+	evs := make(chan item)
+	go func() {
+		defer close(evs)
+		for ev, err := range inner {
 			select {
-			case it, ok := <-evs:
-				if !ok {
-					return
+			case evs <- item{ev, err}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	done := false
+	for {
+		select {
+		case it, ok := <-evs:
+			if !ok {
+				return nil, limitHit{}, false
+			}
+			if text, failed := failure(it.ev); failed && it.err == nil && !done && ctx.Err() == nil {
+				if h, ok := usageLimit(text, time.Now()); ok {
+					return it.ev, h, true
 				}
-				if !yield(it.ev, it.err) {
-					return
-				}
-				done = done || final(it.ev)
-			case ev := <-emit:
-				if done {
-					continue
-				}
-				if !yield(ev, nil) {
-					return
-				}
+			}
+			if !yield(it.ev, it.err) {
+				return nil, limitHit{}, false
+			}
+			done = done || final(it.ev)
+		case ev := <-emit:
+			if done {
+				continue
+			}
+			if !yield(ev, nil) {
+				return nil, limitHit{}, false
 			}
 		}
 	}
@@ -264,7 +316,7 @@ func (l *lead) btw(ctx context.Context, ec *a2asrv.ExecutorContext, m meta) iter
 // event is something wait_events hands the lead.
 type event struct {
 	// question, human, human_message (the person messaged an agent during the run), btw,
-	// subtask_done, subtask_failed, review, conflict, merged
+	// subtask_done, subtask_failed, review, conflict, merged, resumed (after a usage limit)
 	Kind     string `json:"kind"`
 	ID       string `json:"id,omitempty"`
 	Subtask  string `json:"subtask,omitempty"`
@@ -304,6 +356,10 @@ type run struct {
 	waited    time.Duration // how long it waited on the person
 	changes   string        // the run branch's diff stat, once it lands
 	final     *report.Report
+	// paused are the subtasks a usage limit paused: "work" or "review".
+	paused map[string]string
+	// leadWait is set while the lead's turn waits out a usage limit.
+	leadWait chan resumption
 }
 
 // landState is how far merging the finished run branch into base got. It only ever
