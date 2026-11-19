@@ -41,8 +41,9 @@ How a run goes. Use the halo MCP tools for every step; each one is a real messag
    - sonnet: normal feature work, tests, integration with existing code
    - opus: hard design, cross-cutting changes, tricky debugging%s
    Prefer parallel subtasks; add a dependency only when one piece really needs another's code.
-3. ask_human with approve_plan=true and a short summary of the plan. Wait for the answer with wait_events. If @%s rejects, revise with publish_plan and ask again.
-4. Delegate every subtask whose dependencies are done (several at once). Then loop on wait_events:
+3. show (skip it for a one- or two-file change): usually one architecture block of just the part of the system this run touches, with the parts that exist marked existing and the ones the run adds, changes or removes marked so, each tied to its subtask. Add a flow, files, compare or note block only when it helps @%s decide; a question note asks something they can answer while reviewing. Halo draws it; keep labels short.
+4. ask_human with approve_plan=true and a short summary of the plan. Wait for the answer with wait_events. If @%s rejects, the answer holds their notes on the plan (per subtask or part of the architecture): revise once with publish_plan (and show, if the picture changed) so it addresses every note, then ask again. Where you disagree with a note, keep your choice and say why in a note block instead of arguing in text.
+5. Delegate every subtask whose dependencies are done (several at once). Then loop on wait_events:
    - question: answer it with answer (one short, decisive paragraph). Escalate to @%s with ask_human only for product decisions you can't make.
    - subtask_done: call request_review. For trivial changes you may accept instead.
    - review with CHANGES: follow_up the same worker with the reviewer's points. At most 2 review rounds; then accept or escalate.
@@ -52,10 +53,10 @@ How a run goes. Use the halo MCP tools for every step; each one is a real messag
    - conflict: follow_up the worker: merge the run branch into its branch, resolve, re-run the tests.
    - btw: @%s asked you something on the side (like a /btw). Answer it with answer(question_id, text) right away, in a few sentences, then carry on; it doesn't change the plan unless it asks you to.
    - human_message: @%s wrote to you or to a worker (to, subtask) during the run. Follow its next step: relay it to that worker with follow_up once the worker is free (or act on it yourself, say in a delegate's context); when it already went straight to the worker, just take it into account.
-5. When every subtask is done halo merges the run branch into the branch you started from and removes the worktrees; wait for the merged event, then reply with the summary (say whether it merged): what was built, the run branch, review rounds and escalations, and anything @%s should check. If the merge failed, follow the event's next step.
+6. When every subtask is done halo merges the run branch into the branch you started from and removes the worktrees; wait for the merged event, then reply with the summary (say whether it merged): what was built, the run branch, review rounds and escalations, and anything @%s should check. If the merge failed, follow the event's next step.
 
 Keep your own messages short. Do not edit files and do not ask @%s questions in plain text: use the tools.`,
-		lead, strings.Join(roster, "\n"), reviewer, human, human, extra, human, human, human, human, human, human, human)
+		lead, strings.Join(roster, "\n"), reviewer, human, human, extra, human, human, human, human, human, human, human, human)
 }
 
 // workerPrompt is prepended to the first message of a subtask a worker gets.

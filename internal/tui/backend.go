@@ -3,6 +3,7 @@ package tui
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -19,6 +20,7 @@ import (
 	"github.com/three-agent-problem/lagrange/delegate"
 
 	"github.com/three-agent-problem/halo/internal/lg"
+	"github.com/three-agent-problem/halo/internal/plan"
 	"github.com/three-agent-problem/lagrange/ask"
 )
 
@@ -29,6 +31,7 @@ type Wait struct {
 	Question  string
 	Since     time.Time
 	Questions []ask.Question // a multiple-choice form, when the asker sent one
+	Approval  bool           // it asks to approve or reject (the lead's plan)
 }
 
 // Backend is where the TUI gets its events and sends what you do.
@@ -42,6 +45,9 @@ type Backend interface {
 	Waiting(ctx context.Context) ([]Wait, error)
 	// Answer answers a waiting task; decision is "approve", "reject" or "".
 	Answer(ctx context.Context, taskID, text, decision string) error
+	// PlanDoc returns the full plan and the lead's visuals of run root (the
+	// halo.plan.doc artifact), or nil when it has none yet.
+	PlanDoc(ctx context.Context, root string) (*plan.Doc, error)
 	// Cancel cancels a task.
 	Cancel(ctx context.Context, taskID string) error
 	// Online lists the roster's agents with a tunnel up.
@@ -178,6 +184,7 @@ func (l *Live) Waiting(ctx context.Context) ([]Wait, error) {
 		if w.Task.Task != nil && len(w.Task.Task.History) > 0 {
 			q = lg.MessageText(w.Task.Task.History[0])
 			wt.Questions = ask.Parse(w.Task.Task.History[0].Metadata)
+			wt.Approval = ask.IsApproval(w.Task.Task.History[0].Metadata)
 		}
 		wt.Question = q
 		out = append(out, wt)
@@ -189,6 +196,39 @@ func (l *Live) Waiting(ctx context.Context) ([]Wait, error) {
 // Answer implements Backend.
 func (l *Live) Answer(ctx context.Context, taskID, text, decision string) error {
 	return l.client().Answer(ctx, taskID, &client.Answer{Text: text, Decision: decision})
+}
+
+// PlanDoc implements Backend: the task keeps the whole artifact, while the
+// activity log only has its start.
+func (l *Live) PlanDoc(ctx context.Context, root string) (*plan.Doc, error) {
+	t, err := l.client().Task(ctx, root)
+	if err != nil || t.Task == nil {
+		return nil, err
+	}
+	return docOf(t.Task.Artifacts), nil
+}
+
+// docOf finds the plan doc among a task's artifacts.
+func docOf(arts []*a2a.Artifact) *plan.Doc {
+	for _, a := range arts {
+		if a.Name != plan.DocName {
+			continue
+		}
+		for _, p := range a.Parts {
+			if p.Data() == nil {
+				continue
+			}
+			raw, err := json.Marshal(p.Data())
+			if err != nil {
+				continue
+			}
+			var d plan.Doc
+			if json.Unmarshal(raw, &d) == nil {
+				return &d
+			}
+		}
+	}
+	return nil
 }
 
 // Cancel implements Backend.

@@ -359,7 +359,9 @@ type run struct {
 	events    chan event
 	questions map[string]*question
 	qseq      int
-	approval  string // the task asking for plan approval
+	approval  string       // the task asking for plan approval
+	blocks    []plan.Block // the lead's visuals for the plan studio
+	shown     int          // show calls so far
 	subs      map[string]*subRT
 	started   time.Time     // when the run started
 	waited    time.Duration // how long it waited on the person
@@ -422,6 +424,20 @@ func (r *run) publishLocked() {
 		Artifact: &a2a.Artifact{ID: "halo-plan", Name: plan.ArtifactName, Parts: a2a.ContentParts{a2a.NewDataPart(data)}}}
 	r.emitLocked(ev)
 	r.publishReportLocked("")
+}
+
+// publishDocLocked streams the full plan and the lead's visuals as the
+// halo.plan.doc artifact. It changes only when the lead publishes a plan or shows
+// something, so it isn't sent with every status change. Callers hold r.mu.
+func (r *run) publishDocLocked() {
+	if r.ec == nil || (r.plan == nil && len(r.blocks) == 0) {
+		return
+	}
+	raw, _ := json.Marshal(plan.Doc{Plan: r.plan, Blocks: r.blocks, Shown: r.shown})
+	var data map[string]any
+	_ = json.Unmarshal(raw, &data)
+	r.emitLocked(&a2a.TaskArtifactUpdateEvent{TaskID: r.ec.TaskID, ContextID: r.ec.ContextID,
+		Artifact: &a2a.Artifact{ID: "halo-plan-doc", Name: plan.DocName, Parts: a2a.ContentParts{a2a.NewDataPart(data)}}})
 }
 
 // update changes a subtask under the lock and publishes the plan.

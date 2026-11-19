@@ -27,6 +27,7 @@ func init() {
 	}
 	styles["alert"] = lipgloss.NewStyle().Foreground(lipgloss.Color(palette["bg"])).Background(lipgloss.Color(palette["ask"])).Bold(true)
 	styles["badge"] = lipgloss.NewStyle().Foreground(lipgloss.Color(palette["bg"])).Bold(true)
+	styles["struck"] = lipgloss.NewStyle().Foreground(lipgloss.Color(palette["fail"])).Strikethrough(true)
 	styles["cursor"] = lipgloss.NewStyle().Foreground(lipgloss.Color(palette["bg"])).Background(lipgloss.Color(palette["haiku"]))
 }
 

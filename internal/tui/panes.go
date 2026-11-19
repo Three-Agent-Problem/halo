@@ -116,6 +116,9 @@ func (s *State) planPane(w, h int, size Size, focused bool, sc Screen) (string, 
 		}
 		return title, "", []string{c("mute", "planning… "+string(spin[sc.Frame%len(spin)])), "", c("dim", "› "+s.Prompt)}
 	}
+	if size == sizeStudio {
+		return s.studioPane(w, h, sc)
+	}
 	done := 0
 	for _, st := range s.Plan.Subtasks {
 		if st.Status == plan.Done {

@@ -39,6 +39,14 @@ type Demo struct {
 	pid     int
 	msgs    int        // fake human messages sent
 	history []lg.Entry // what was emitted, for Runs and History
+	doc     *plan.Doc  // the run's plan doc
+}
+
+// PlanDoc implements Backend.
+func (d *Demo) PlanDoc(context.Context, string) (*plan.Doc, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.doc, nil
 }
 
 // demoHistory caps the entries the demo keeps for Runs and History.
@@ -384,6 +392,70 @@ func (d *Demo) reply(id, text string) {
 	d.state(id, "TASK_STATE_COMPLETED", "")
 }
 
+// noteBody is the notes without their first line, on one line.
+func noteBody(notes string) string {
+	_, body, ok := strings.Cut(notes, "\n")
+	if !ok {
+		body = notes
+	}
+	return strings.Join(strings.Fields(body), " ")
+}
+
+// demoBlocks are the visuals the demo's lead shows with its plan.
+func demoBlocks() []plan.Block {
+	return []plan.Block{
+		{Kind: plan.KindArchitecture, Title: "task store",
+			Groups: []plan.Group{{ID: "web", Label: "web"}, {ID: "api", Label: "api"}, {ID: "store", Label: "store"}, {ID: "db", Label: "postgres"}},
+			Nodes: []plan.Node{
+				{ID: "form", Label: "TaskForm.tsx", Group: "web", Change: plan.New, Subtask: "S4"},
+				{ID: "routes", Label: "routes.tsx", Group: "web", Change: plan.Changed, Subtask: "S4"},
+				{ID: "tasks", Label: "/api/tasks", Group: "api", Change: plan.New, Subtask: "S3"},
+				{ID: "platform", Label: "platform/api.go", Group: "api"},
+				{ID: "pg", Label: "pg task store", Group: "store", Change: plan.New, Subtask: "S2"},
+				{ID: "iface", Label: "store.Store", Group: "store"},
+				{ID: "mem", Label: "memory store", Group: "store"},
+				{ID: "tables", Label: "tasks, task_events", Group: "db", Change: plan.New, Subtask: "S1"},
+				{ID: "links", Label: "links (0006)", Group: "db"},
+			},
+			Edges: []plan.Edge{
+				{From: "form", To: "tasks", Label: "POST", Change: plan.New},
+				{From: "routes", To: "platform"},
+				{From: "tasks", To: "pg", Change: plan.New},
+				{From: "platform", To: "iface"},
+				{From: "pg", To: "tables", Change: plan.New},
+				{From: "iface", To: "links"},
+				{From: "pg", To: "iface", Label: "implements", Change: plan.New},
+			}},
+		{Kind: plan.KindFlow, Title: "create a task",
+			Steps: []plan.Step{
+				{From: "browser", To: "api", Text: "POST /api/tasks {title}", Change: plan.New},
+				{From: "api", Text: "validate the title", Change: plan.New},
+				{From: "api", To: "store", Text: "Create(ctx, task)", Change: plan.New},
+				{From: "store", To: "postgres", Text: "INSERT … RETURNING id", Change: plan.New},
+				{From: "api", To: "browser", Text: "201 + the task", Change: plan.New},
+			}},
+		{Kind: plan.KindFiles, Title: "files",
+			Paths: []plan.Path{
+				{Path: "migrations/0007_tasks.sql", Change: plan.New, Subtask: "S1"},
+				{Path: "migrations/0007_tasks.down.sql", Change: plan.New, Subtask: "S1"},
+				{Path: "store/pg.go", Change: plan.New, Subtask: "S2"},
+				{Path: "store/pg_test.go", Change: plan.New, Subtask: "S2"},
+				{Path: "api/tasks.go", Change: plan.New, Subtask: "S3"},
+				{Path: "api/routes.go", Change: plan.Changed, Subtask: "S3"},
+				{Path: "web/src/TaskForm.tsx", Change: plan.New, Subtask: "S4"},
+				{Path: "web/src/routes.tsx", Change: plan.Changed, Subtask: "S4"},
+			}},
+		{Kind: plan.KindCompare, Title: "queue",
+			Columns: []string{"option", "for", "against"},
+			Rows: [][]string{
+				{"SKIP LOCKED (picked)", "no new service, one transaction", "polling"},
+				{"LISTEN/NOTIFY", "instant wake-ups", "drops events while disconnected"},
+			}},
+		{Kind: plan.KindNote, Tone: "question", Title: "retention",
+			Text: "Finished tasks stay forever in this plan. Should they be deleted after 30 days instead?"},
+	}
+}
+
 func (d *Demo) run(ctx context.Context) {
 	root := fmt.Sprintf("demo-%06x", rand.IntN(0xffffff))
 	d.mu.Lock()
@@ -394,12 +466,38 @@ func (d *Demo) run(ctx context.Context) {
 	p := &plan.Plan{
 		Goal: "Durable tasks in Postgres behind store.Store, exposed at /api/tasks, with a web form. Tests stay green.",
 		Subtasks: []*plan.Subtask{
-			{ID: "S1", Title: "schema migration", Model: "haiku", Status: plan.Pending},
-			{ID: "S2", Title: "pg task store", Model: "sonnet", Deps: []string{"S1"}, Status: plan.Pending},
-			{ID: "S3", Title: "/api/tasks routes", Model: "sonnet", Deps: []string{"S1"}, Status: plan.Pending},
-			{ID: "S4", Title: "web task form", Model: "haiku", Deps: []string{"S3"}, Status: plan.Pending},
-			{ID: "S5", Title: "integrate + checks", Model: "opus", Deps: []string{"S2", "S3", "S4"}, Status: plan.Pending},
+			{ID: "S1", Title: "schema migration", Model: "haiku", Status: plan.Pending,
+				Spec:       "Add migrations/0007_tasks.sql with tables tasks (id, context_id, title, state, created_at) and task_events (task_id, at, kind, data), and the matching down migration.",
+				Acceptance: "go run ./cmd/migrate -dry applies up and down cleanly."},
+			{ID: "S2", Title: "pg task store", Model: "sonnet", Deps: []string{"S1"}, Status: plan.Pending,
+				Spec:       "Implement store.Store in store/pg.go on the new tables. Claim queued tasks with FOR UPDATE SKIP LOCKED. Keep the memory store for tests.",
+				Acceptance: "store/pg_test.go runs the shared store suite against Postgres; go test ./store/... passes."},
+			{ID: "S3", Title: "/api/tasks routes", Model: "sonnet", Deps: []string{"S1"}, Status: plan.Pending,
+				Spec:       "GET and POST /api/tasks in api/tasks.go, registered in api/routes.go, following platform/api.go (errors, auth, JSON shapes).",
+				Acceptance: "api/tasks_test.go covers list, create, a missing title (400) and auth (401)."},
+			{ID: "S4", Title: "web task form", Model: "haiku", Deps: []string{"S3"}, Status: plan.Pending,
+				Spec:       "web/src/TaskForm.tsx: a title field and a submit button that POSTs /api/tasks and shows the API's validation errors.",
+				Acceptance: "npm test covers submit, an empty title and a server error."},
+			{ID: "S5", Title: "integrate + checks", Model: "opus", Deps: []string{"S2", "S3", "S4"}, Status: plan.Pending,
+				Spec:       "Run every check on the run branch and fix what breaks between the pieces.",
+				Acceptance: "go vet, go test ./... and npm test pass on the run branch."},
 		},
+	}
+	full := *p
+	full.Subtasks = make([]*plan.Subtask, len(p.Subtasks))
+	for i, st := range p.Subtasks {
+		c := *st
+		full.Subtasks[i] = &c
+	}
+	p.Version, full.Version = 1, 1
+	blocks := demoBlocks()
+	publishDoc := func() {
+		doc := &plan.Doc{Plan: &full, Blocks: blocks, Shown: 1}
+		raw, _ := json.Marshal(doc)
+		d.mu.Lock()
+		d.doc = doc
+		d.mu.Unlock()
+		d.art(root, root+"-doc", plan.DocName, string(raw), false)
 	}
 	publish := func() {
 		raw, _ := json.Marshal(p.Public())
@@ -467,31 +565,60 @@ func (d *Demo) run(ctx context.Context) {
 	d.waiting = nil
 	d.mu.Unlock()
 	d.send(lg.Entry{Kind: "task", TaskID: qid, ParentTaskID: root, Sender: lead, Recipient: d.Human, State: "TASK_STATE_COMPLETED", Summary: qans})
-	d.work(ctx, root, []string{"mcp__halo__publish_plan"}, time.Second)
+	d.work(ctx, root, []string{"mcp__halo__publish_plan", "mcp__halo__show"}, time.Second)
 	publish()
+	publishDoc()
 	sleep(ctx, time.Second)
-	apr := root + "-ask"
-	d.task(apr, root, lead, d.Human, "Approve this plan? 5 subtasks: S1 schema (haiku), S2 pg store (sonnet), S3 routes (sonnet), S4 web form (haiku), S5 integrate (opus).")
-	d.state(apr, "TASK_STATE_INPUT_REQUIRED", "Waiting for you to answer.")
-	d.mu.Lock()
-	d.waiting = &Wait{TaskID: apr, Asker: lead, Question: "Approve this plan? 5 subtasks: S1 schema (haiku), S2 pg store (sonnet), S3 routes (sonnet), S4 web form (haiku), S5 integrate (opus).", Since: time.Now()}
-	d.mu.Unlock()
-	answer := "approve keep the API under /api"
-	select {
-	case answer = <-d.answer:
-	case <-time.After(8 * time.Second):
-	case <-ctx.Done():
-		return
+	// The approval waits for you (it approves itself after a while). Notes from
+	// the studio come back as a rejection with text: the lead revises once and
+	// asks again.
+	var answer string
+	for round := 1; ; round++ {
+		apr := fmt.Sprintf("%s-ask%d", root, round)
+		q := "Approve this plan? 5 subtasks: S1 schema (haiku), S2 pg store (sonnet), S3 routes (sonnet), S4 web form (haiku), S5 integrate (opus)."
+		if round > 1 {
+			q = fmt.Sprintf("Revised the plan (version %d) from your notes. Approve?", full.Version)
+		}
+		d.task(apr, root, lead, d.Human, q)
+		d.state(apr, "TASK_STATE_INPUT_REQUIRED", "Waiting for you to answer.")
+		d.mu.Lock()
+		d.waiting = &Wait{TaskID: apr, Asker: lead, Question: q, Since: time.Now(), Approval: true}
+		d.mu.Unlock()
+		answer = "approve keep the API under /api"
+		select {
+		case answer = <-d.answer:
+		case <-time.After(20 * time.Second):
+		case <-ctx.Done():
+			return
+		}
+		d.mu.Lock()
+		d.waiting = nil
+		d.mu.Unlock()
+		notes := strings.TrimSpace(strings.TrimPrefix(answer, "reject"))
+		if !strings.HasPrefix(answer, "reject") || notes == "" || round > 2 {
+			if strings.HasPrefix(answer, "reject") {
+				d.send(lg.Entry{Kind: "task", TaskID: apr, ParentTaskID: root, Sender: lead, Recipient: d.Human, State: "TASK_STATE_REJECTED", Summary: answer})
+				d.state(root, "TASK_STATE_COMPLETED", "")
+				return
+			}
+			d.send(lg.Entry{Kind: "task", TaskID: apr, ParentTaskID: root, Sender: lead, Recipient: d.Human, State: "TASK_STATE_COMPLETED", Summary: strings.TrimPrefix(answer, "approve ")})
+			break
+		}
+		d.send(lg.Entry{Kind: "task", TaskID: apr, ParentTaskID: root, Sender: lead, Recipient: d.Human, State: "TASK_STATE_REJECTED", Summary: notes})
+		d.chunk(lead, root, "agent_thought_chunk", "Revising the plan from the notes: "+firstLine(strings.TrimPrefix(notes, "My notes on the plan")))
+		d.work(ctx, root, []string{"Read store/store.go", "mcp__halo__publish_plan", "mcp__halo__show"}, 2*time.Second)
+		// A scripted revision: S2 gets the index the reviewer would ask for later,
+		// and a note answers the notes.
+		s2 := full.Get("S2")
+		s2.Spec += " Index tasks.context_id: the API filters on it."
+		full.Version++
+		p.Version = full.Version
+		blocks = append(demoBlocks(), plan.Block{Kind: plan.KindNote, Tone: "info", Title: "revised",
+			Text: "Your notes: " + noteBody(notes) + " (the demo only adds an index to S2; a real lead revises from each note.)"})
+		publish()
+		publishDoc()
+		sleep(ctx, time.Second)
 	}
-	d.mu.Lock()
-	d.waiting = nil
-	d.mu.Unlock()
-	if strings.HasPrefix(answer, "reject") {
-		d.send(lg.Entry{Kind: "task", TaskID: apr, ParentTaskID: root, Sender: lead, Recipient: d.Human, State: "TASK_STATE_REJECTED", Summary: answer})
-		d.state(root, "TASK_STATE_COMPLETED", "")
-		return
-	}
-	d.send(lg.Entry{Kind: "task", TaskID: apr, ParentTaskID: root, Sender: lead, Recipient: d.Human, State: "TASK_STATE_COMPLETED", Summary: strings.TrimPrefix(answer, "approve ")})
 	p.Approved, p.Branch = true, "halo/run-"+root[len(root)-4:]
 	publish()
 	d.state(root, "TASK_STATE_WORKING", "Finished mcp__halo__delegate S1")

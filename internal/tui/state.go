@@ -144,8 +144,16 @@ type State struct {
 	Report    *report.Report
 	ReportNew bool
 	planArt   string
-	Follow    bool
-	btws      map[string]string // btw task → its last state
+	// Doc is the full plan and the lead's visuals (halo.plan.doc), for the plan
+	// studio. DocWant is set when the log's copy was cut and it must be fetched.
+	Doc     *plan.Doc
+	DocWant bool
+	// DocMarks are how the latest plan version differs from the one before:
+	// subtask ID → "+" or "~"; DocRemoved are the subtasks it dropped.
+	DocMarks   map[string]string
+	DocRemoved []string
+	Follow     bool
+	btws       map[string]string // btw task → its last state
 	// Hosted is set when this Halo hosts the team: the agents' raw output comes
 	// through Feed, so the activity log's copy of it is skipped.
 	Hosted     bool
@@ -353,6 +361,7 @@ func (s *State) startRun(e lg.Entry, now time.Time) {
 	s.Commits = nil
 	s.Tasks = map[string]*Task{}
 	s.Plan, s.planArt = nil, ""
+	s.Doc, s.DocWant, s.DocMarks, s.DocRemoved = nil, false, nil, nil
 	s.Packets, s.Dots = nil, nil
 	s.Questions, s.Reviews = 0, 0
 	for _, a := range s.Agents {
@@ -557,6 +566,18 @@ func (s *State) artifact(e lg.Entry, now time.Time, live bool) {
 		}
 		return
 	}
+	if e.Summary == plan.DocName {
+		if e.TaskID == s.Root {
+			var d plan.Doc
+			if json.Unmarshal([]byte(e.Str("content")), &d) == nil {
+				s.SetDoc(&d)
+				s.DocWant = false
+			} else {
+				s.DocWant = true
+			}
+		}
+		return
+	}
 	if e.Summary == plan.ArtifactName || (id != "" && id == s.planArt) {
 		s.planArt = id
 		var p plan.Plan
@@ -591,6 +612,23 @@ func (s *State) artifact(e lg.Entry, now time.Time, live bool) {
 	if live {
 		s.Dots = append(s.Dots, Dot{From: t.Recipient, Start: now})
 	}
+}
+
+// SetDoc takes a new plan doc. A new plan version is compared with the one
+// before it, for the studio's change marks.
+func (s *State) SetDoc(d *plan.Doc) {
+	if d == nil {
+		return
+	}
+	old := s.Doc
+	s.Doc = d
+	if old == nil || old.Plan == nil || d.Plan == nil || d.Plan.Version == old.Plan.Version {
+		if old == nil || old.Plan == nil {
+			s.DocMarks, s.DocRemoved = nil, nil
+		}
+		return
+	}
+	s.DocMarks, s.DocRemoved = plan.Diff(old.Plan, d.Plan)
 }
 
 // setPlan takes a new copy of the plan and logs what changed as hub notes.

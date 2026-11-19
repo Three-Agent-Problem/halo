@@ -111,6 +111,10 @@ type planIn struct {
 	Subtasks []subIn `json:"subtasks"`
 }
 
+type showIn struct {
+	Blocks []plan.Block `json:"blocks" jsonschema:"1-6 visuals; each call replaces the last ones"`
+}
+
 type idIn struct {
 	SubtaskID string `json:"subtask_id"`
 }
@@ -176,6 +180,14 @@ func (h *Host) leadMCP() http.Handler {
 					return nil, out{}, err
 				}
 				return r.publishPlan(in)
+			})
+		mcp.AddTool(s, &mcp.Tool{Name: "show", Description: "Show the person visuals of the plan in Halo's plan studio: an architecture of the part of the system the run touches (existing parts and what the run adds, changes or removes), a flow, the files, a comparison or a note. Halo draws them; send only the structure. Each call replaces the last one."},
+			func(ctx context.Context, _ *mcp.CallToolRequest, in showIn) (*mcp.CallToolResult, out, error) {
+				r, err := open()
+				if err != nil {
+					return nil, out{}, err
+				}
+				return r.show(in)
 			})
 		mcp.AddTool(s, &mcp.Tool{Name: "ask_human", Description: "Ask the person a question in their Lagrange inbox. With questions, it is a multiple-choice form (Halo shows it like Claude Code's plan questions; the answer comes back as one line per question). Returns at once; the answer arrives through wait_events (kind human)."},
 			func(ctx context.Context, _ *mcp.CallToolRequest, in askHumanIn) (*mcp.CallToolResult, out, error) {
@@ -291,9 +303,46 @@ func (r *run) publishPlan(in planIn) (*mcp.CallToolResult, out, error) {
 	if r.plan != nil && r.plan.Approved {
 		return nil, out{}, errors.New("the plan is approved and can't be replaced; use follow_up and escalate")
 	}
+	if r.plan != nil {
+		p.Version = r.plan.Version
+	}
+	p.Version++
 	r.plan = p
 	r.publishLocked()
-	return ok("Published %d subtasks. Next: ask_human with approve_plan=true, then wait_events.", len(p.Subtasks))
+	r.publishDocLocked()
+	next := "Next: show the person the architecture this run touches (if it helps), then ask_human with approve_plan=true, then wait_events."
+	if r.shown > 0 {
+		next = "Next: call show again if the visuals no longer match the plan, then ask_human with approve_plan=true, then wait_events."
+	}
+	return ok("Published version %d with %d subtasks. %s", p.Version, len(p.Subtasks), next)
+}
+
+func (r *run) show(in showIn) (*mcp.CallToolResult, out, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var ids []string
+	if r.plan != nil {
+		ids = r.plan.IDs()
+	}
+	for i := range in.Blocks {
+		b := &in.Blocks[i]
+		for j := range b.Nodes {
+			b.Nodes[j].Subtask = strings.ToUpper(strings.TrimSpace(b.Nodes[j].Subtask))
+		}
+		for j := range b.Paths {
+			b.Paths[j].Subtask = strings.ToUpper(strings.TrimSpace(b.Paths[j].Subtask))
+		}
+	}
+	if len(in.Blocks) == 0 {
+		return nil, out{}, errors.New("show at least one block")
+	}
+	if err := plan.ValidateBlocks(in.Blocks, ids); err != nil {
+		return nil, out{}, err
+	}
+	r.blocks = in.Blocks
+	r.shown++
+	r.publishDocLocked()
+	return ok("Showing %d blocks in the plan studio.", len(in.Blocks))
 }
 
 func upper(ids []string) []string {
@@ -359,7 +408,7 @@ func (r *run) askHuman(ctx context.Context, in askHumanIn) (*mcp.CallToolResult,
 				}
 				e.Hint = "the plan is approved: delegate every subtask without dependencies"
 			} else {
-				e.Hint = "revise the plan with publish_plan and ask again"
+				e.Hint = "revise the plan with publish_plan (and show, if the visuals changed), addressing each of their notes, then ask again"
 			}
 		}
 		r.push(e)

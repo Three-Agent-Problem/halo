@@ -104,13 +104,16 @@ cd ~/code/your-repo && halo      # asks for the server and the key once, then ho
 ![The plan at full size: a timeline with a lane per agent](docs/screenshots/timeline.png)
 <sub>**`1` `+` `+` `+`: the plan at full size** is a timeline with a lane per agent: working, in review, waiting on you, and what each one does now.</sub>
 
+![The plan studio: the lead's architecture of the change, with your notes](docs/screenshots/studio.png)
+<sub>**The plan studio** opens when the plan waits for you. The lead draws the part of the system the run touches: dim boxes exist, green double ones are new, yellow ones change. `c` writes a note on a box or a subtask, `m`/`x` change a model or drop a subtask, `s` sends every note in one go (the lead revises, and the studio marks what changed), and `y` approves.</sub>
+
 ## Panels and keys
 
 It works like lazygit: every panel has a number, and `enter` opens the selected item. `+` grows the focused panel in steps: first its whole column (the panels above and below collapse to one-line bars), then the orbit's width too, then the whole screen. `-` shrinks it, and below normal size the panel collapses to a one-line bar. Moving the focus puts grown panels back to normal size.
 
 | Panel | Shows | `enter` opens |
 |---|---|---|
-| `1` plan | Subtasks, models, progress, and what each running worker is doing now. Grown: a kanban. Full size: a timeline per agent. | The subtask: status, attempts, commits and every message about it. |
+| `1` plan | Subtasks, models, progress, and what each running worker is doing now. Grown: a kanban. Full size: a timeline per agent. One more `+`: the plan studio, with the lead's pictures of the plan, each subtask's spec, and your notes on them. | The subtask: status, attempts, commits and every message about it. |
 | `2` orbit | Every message travelling through Lagrange. | (grows it) |
 | `3` agent | The agent's raw Claude Code output: thinking, messages and tool calls with their output. `v` switches to the tool calls Lagrange saw, and `h`/`l` switch agents. | A tool call's full input and output. |
 | `4` comms | Agent ⇄ agent messages. `f` filters by agent. `+` makes it taller, then gives it the left side with every other panel compact on the right (you keep talking while the run stays in view), then the full screen with your past runs beside it: `[` `]` pick one, `o` opens it. | The whole message. |
@@ -142,7 +145,8 @@ The lead orchestrates only through MCP tools. Each tool call is a Lagrange task,
 | Tool | What it does |
 |---|---|
 | `ask_human` | Asks you something: up to 4 multiple-choice `questions`, or a plan approval. It shows in the TUI and in your Lagrange inbox, and reaches your phone by Telegram (with buttons), email or Slack. |
-| `publish_plan` | The goal and the subtasks (id, spec, acceptance, model, deps). The plan streams to the TUI as the `halo.plan` artifact. |
+| `publish_plan` | The goal and the subtasks (id, spec, acceptance, model, deps). The plan streams to the TUI as the `halo.plan` artifact. Every publication counts up the plan's version. |
+| `show` | Pictures of the plan for the studio, sent as structure that Halo draws: an `architecture` (groups, nodes and edges, each marked existing, new, changed or removed and tied to a subtask), a `flow`, `files`, a `compare` table or a `note`. At most 6 blocks and 14 nodes. They travel with the full plan as the `halo.plan.doc` artifact, which the TUI reads from the task, because the activity log keeps only 4 KB of an artifact. |
 | `delegate` | Sends a subtask whose dependencies are merged to the least busy worker of its model, in a fresh worktree of `halo/<run>`. |
 | `wait_events` | Waits for what happened: worker questions (`ask_lead`, answered with `answer`), finished or failed subtasks, reviews, merge conflicts, your answers. |
 | `request_review` | The reviewer reads the diff. APPROVE merges the subtask into the run branch. CHANGES leads to `follow_up`: the same worker, in the same Claude session, for at most 2 rounds. |

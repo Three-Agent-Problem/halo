@@ -44,6 +44,8 @@ type Plan struct {
 	Goal     string `json:"goal"`
 	Branch   string `json:"branch,omitempty"`
 	Approved bool   `json:"approved,omitempty"`
+	// Version counts the plan's publications: 1 for the first, 2 after a revision.
+	Version int `json:"version,omitempty"`
 	// MergedInto is the base branch the run branch was merged into.
 	MergedInto string     `json:"merged_into,omitempty"`
 	Subtasks   []*Subtask `json:"subtasks"`

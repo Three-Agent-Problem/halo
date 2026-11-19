@@ -387,6 +387,8 @@ func TestSnapshot(t *testing.T) {
 		}
 		if _, cmd := m.normalKey(k); cmd != nil && k == "+" && m.ui.Focus == pComms {
 			run(cmd) // the runs beside the full-screen comms
+		} else if cmd != nil && m.ui.Focus == pPlan && m.ui.Size[pPlan] == sizeStudio {
+			run(cmd) // the studio sends notes or approves
 		}
 	}
 	out := toHTML(m.render(time.Now()))

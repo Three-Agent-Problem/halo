@@ -52,9 +52,10 @@ const (
 	modePrompt
 	modeAnswer
 	modeNote
-	modeName      // naming a new agent
-	modeMessage   // a message to one agent, via the lead or direct
-	modeQuestions // answering the lead's multiple-choice questions
+	modeName       // naming a new agent
+	modeMessage    // a message to one agent, via the lead or direct
+	modeQuestions  // answering the lead's multiple-choice questions
+	modeStudioNote // writing a note in the plan studio
 )
 
 const promptHint = "describe what to build, then enter"
@@ -114,7 +115,10 @@ type model struct {
 	picker        *picker
 	runs          []RunInfo // your runs, listed beside the full-screen comms
 	runSel        int
-	pendingSize   Size // the comms size to keep once a run opened from the list loads
+	pendingSize   Size            // the comms size to keep once a run opened from the list loads
+	noteFor       studioNote      // what the studio note being typed is about
+	docLoading    bool            // the plan doc is being fetched
+	studioFor     map[string]bool // plan approvals the studio opened for
 	ctx           context.Context
 }
 
@@ -253,9 +257,17 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.filesLoaded = false
 			m.ui.Cur[pCommits] = &pcursor{follow: true}
 		}
+		doc := m.fetchDoc()
 		if msg.Kind == "task" && msg.Recipient == m.st.Human {
-			return m, m.fetch()
+			return m, tea.Batch(m.fetch(), doc)
 		}
+		return m, doc
+	case docMsg:
+		m.docLoading = false
+		if msg.root == m.st.Root && msg.doc != nil {
+			m.st.SetDoc(msg.doc)
+		}
+		return m, m.fetchDoc()
 	case connMsg:
 		m.connected = msg.ok
 	case tea.FocusMsg:
@@ -265,6 +277,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case waitsMsg:
 		ping := m.newWaits(msg)
 		m.waits = msg
+		m.openStudio(msg)
 		if ping != nil && !m.tgPaired && !m.tgTip && m.connector() != nil && !m.o.Quiet {
 			m.tgTip = true
 			m.say("tip: /connections sends what waits on you to Telegram, with buttons to answer")
@@ -454,6 +467,11 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch m.mode {
+	case modeStudioNote:
+		if m.popupKey(key) {
+			return m, nil
+		}
+		return m.noteKey(k)
 	case modeQuestions:
 		if m.qf == nil {
 			m.mode = modeNormal
@@ -612,6 +630,11 @@ func (m *model) normalKey(key string) (tea.Model, tea.Cmd) {
 	}
 	if u.Focus == pRoster && !u.cur().detail {
 		if cmd, ok := m.rosterKey(key); ok {
+			return m, cmd
+		}
+	}
+	if u.Focus == pPlan && u.Size[pPlan] == sizeStudio {
+		if cmd, ok := m.studioKey(key); ok {
 			return m, cmd
 		}
 	}
@@ -939,7 +962,7 @@ func (m *model) dropWait(taskID string) {
 // planW is the plan panel's inner width at its current size.
 func (m *model) planW() int {
 	switch {
-	case m.w < minWide || m.ui.Size[pPlan] == sizeFull:
+	case m.w < minWide || m.ui.Size[pPlan] >= sizeFull:
 		return m.w - 4
 	case m.ui.Size[pPlan] == sizeWide:
 		return m.w - rightW - 4
@@ -1025,7 +1048,7 @@ func (m *model) render(now time.Time) string {
 		m.st.Preview = m.previewFor(pl.Branch)
 	}
 	sc := Screen{W: m.w, H: m.h, Frame: m.frame, Now: now, Server: m.o.Server, Connected: m.connected,
-		Online: m.online, Waiting: len(m.waits), Flash: m.flash, UI: m.ui, Team: "team here", Procs: m.o.Procs != nil,
+		Online: m.online, Waiting: len(m.waits), Approval: m.approvalWait() != nil, Flash: m.flash, UI: m.ui, Team: "team here", Procs: m.o.Procs != nil,
 		Runs: m.runs, RunSel: m.runSel}
 	if m.o.Team == nil {
 		sc.Team = "watch-only"
@@ -1103,10 +1126,20 @@ func (m *model) footer() string {
 		keys = k("↑↓", "choose") + k("⏎/space", "pick") + k("←→", "questions") + k("esc", "later")
 	case m.mode == modeMessage:
 		keys = k("⏎", "send") + k("tab", "direct/lead") + k("esc", "cancel")
-	case m.mode == modePrompt || m.mode == modeNote || m.mode == modeName:
+	case m.mode == modePrompt || m.mode == modeNote || m.mode == modeName || m.mode == modeStudioNote:
 		keys = k("⏎", "send") + k("esc", "back")
 	case m.mode == modeAnswer:
 		keys = k("y", "approve") + k("n", "reject") + k("r", "reply") + k("esc", "later")
+	case m.ui.Focus == pPlan && m.ui.Size[pPlan] == sizeStudio && m.mode == modeNormal:
+		keys = k("h/l", "subtask") + k("j/k", "parts") + k("[ ]", "view") + k("⏎", "spec") + k("c", "note")
+		if m.st.Plan == nil || !m.st.Plan.Approved {
+			keys += k("m", "model") + k("x", "drop")
+		}
+		keys += k("s", "send notes")
+		if m.approvalWait() != nil {
+			keys += k("y", "approve")
+		}
+		keys += k("esc", "close")
 	default:
 		if m.ui.cur().detail {
 			keys = k("j/k", "scroll") + k("esc", "back")

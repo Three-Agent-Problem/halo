@@ -126,10 +126,15 @@ What happens next:
 
    ![The lead's questions](screenshots/questions.png)
 
-3. **It publishes a plan and asks you to approve it.** Panel `1` lists the subtasks and the model each one gets. Press **`a`**, then:
-   - **`y`** to approve it,
-   - **`n`** to reject it,
-   - **`r`** to reply with changes (for example "use the existing router, not a new one"). The lead revises the plan and asks again.
+3. **It publishes a plan and asks you to approve it.** The **plan studio** opens by itself: the subtasks with their models, and the pictures the lead drew of the plan. Usually that's an architecture of the part of your system the run touches, where dim boxes already exist, green double boxes are new, yellow ones change and red dashed ones go away. It can also show a flow, the files, a comparison or a question for you.
+   - `h`/`l` pick a subtask, `j`/`k` pick a part of the picture, `[` `]` switch pictures, and `enter` shows the selected subtask's full spec and acceptance criteria.
+   - **`c`** writes a note on what is selected ("keep it under /api"), **`m`** changes a subtask's model and **`x`** drops it. Notes pile up at the bottom; `u` undoes the last one.
+   - **`s`** sends all your notes at once. The lead revises the plan and asks again, and the studio marks what changed (`~` changed, `+` new) next to `v2`.
+   - **`y`** approves the plan as it is.
+
+   Outside the studio, `a` still answers with `y` approve, `n` reject or `r` reply.
+
+   ![The plan studio](screenshots/studio.png)
 
 ✅ **You should see:** after you approve, the plan's subtasks start moving from `○` to running, and workers light up in the orbit.
 
@@ -141,7 +146,7 @@ Everything here is optional. The run goes on by itself.
 
 | Want to… | Do |
 |---|---|
-| See the plan as a board | `1` then `+` (once more for wider, a third time for a timeline per agent) |
+| See the plan as a board | `1` then `+` (once more for wider, a third time for a timeline per agent, a fourth for the plan studio) |
 | Follow one agent's raw output | `3`, then `h`/`l` to switch agents |
 | Read what agents tell each other | `4` (`f` filters by agent) |
 | See commits as they land | `5` then `+`, and `enter` on a commit for its diff |

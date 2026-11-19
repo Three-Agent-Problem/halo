@@ -28,6 +28,7 @@ const (
 	sizeColumn                 // the panel takes its whole column (comms: half the height)
 	sizeWide                   // its column also takes the orbit's width (comms: the left side, the rest compact beside it)
 	sizeFull                   // the panel takes the whole screen
+	sizeStudio                 // plan only: the whole screen, as the plan studio
 )
 
 // label is how the tab bar names panel id's size.
@@ -48,6 +49,8 @@ func (z Size) String() string {
 		return "wide"
 	case sizeFull:
 		return "full"
+	case sizeStudio:
+		return "studio"
 	}
 	return "normal"
 }
@@ -62,6 +65,8 @@ func ladder(id int) []Size {
 		return []Size{sizeNormal, sizeWide, sizeFull}
 	case pComms:
 		return []Size{sizeNormal, sizeColumn, sizeWide, sizeFull}
+	case pPlan:
+		return []Size{sizeMin, sizeNormal, sizeColumn, sizeWide, sizeFull, sizeStudio}
 	}
 	return []Size{sizeMin, sizeNormal, sizeColumn, sizeWide, sizeFull}
 }
@@ -102,11 +107,13 @@ type UI struct {
 	Out    map[int]string    // shell pid → the end of its output
 	// BoardOff is the stacked plan board's scroll offset.
 	BoardOff int
+	// Studio is the plan studio's selection and your draft notes.
+	Studio *studio
 }
 
 // NewUI focuses the comms panel.
 func NewUI() *UI {
-	u := &UI{Focus: pComms, Diffs: map[string]string{}, Out: map[int]string{}}
+	u := &UI{Focus: pComms, Diffs: map[string]string{}, Out: map[int]string{}, Studio: &studio{}}
 	for i := range u.Cur {
 		u.Cur[i] = &pcursor{follow: i != pPlan && i != pRoster && i != pShells}
 	}

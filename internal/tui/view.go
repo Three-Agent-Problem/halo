@@ -28,6 +28,7 @@ type Screen struct {
 	Connected bool
 	Online    int
 	Waiting   int
+	Approval  bool     // the lead's plan approval waits on you
 	Footer    string   // the prompt line(s), already rendered
 	Popup     []string // the completion list, drawn above the input
 	Bottom    string   // replaces the bottom of the screen when set (answering)
@@ -60,7 +61,7 @@ func (s *State) Render(sc Screen) string {
 	foot := strings.Split(sc.Footer, "\n")
 	bodyH := sc.H - 1 - len(foot)
 	var body []string
-	if u.grown() == sizeFull {
+	if u.grown() >= sizeFull {
 		pane := s.paneBox(u.Focus, sc.W, bodyH-1, sc)
 		if u.Focus == pComms && sc.W >= runsW+sideMin {
 			// Past conversations beside the comms, to open without /resume.
