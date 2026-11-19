@@ -20,7 +20,7 @@ var commands = [][2]string{
 	{"/clear", "start fresh: a new conversation with the lead"},
 	{"/resume", "reopen a past run and continue its conversation"},
 	{"/merge", "land the current run on your branch now"},
-	{"/summary", "the run's summary: what it built, what it cost"},
+	{"/summary", "the run's summary: what it built, what it cost; o reads it all, a asks the lead about it"},
 	{"/connections", "connect Telegram: answer and follow runs from your phone"},
 	{"/continue", "continue a team paused on Claude's usage limit now (/continue wait · /continue stop)"},
 	{"/login", "log in to another Claude account (claude auth login), then continue a paused team"},
@@ -108,10 +108,13 @@ func (m *model) command(text string) tea.Cmd {
 	case "/help":
 		m.ui.Help, m.ui.Query = true, ""
 	case "/summary":
-		if m.st.Report == nil {
-			m.say("no summary yet: the run publishes one once its plan is up")
-		} else {
+		switch {
+		case m.st.Report != nil:
 			m.summary = true
+		case m.st.Root != "":
+			m.openReader() // no report yet: what the run has so far
+		default:
+			m.say("no run on screen · /resume opens a past one")
 		}
 	case "/connections":
 		return m.openConnections()

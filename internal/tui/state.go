@@ -536,6 +536,7 @@ func (s *State) task(e lg.Entry, now time.Time, live bool) {
 		a.LastAct = now
 		if t.ID == s.Root {
 			s.RootState, s.RootEnd = e.State, now
+			s.comm(now, "hub", "", "", s.ending(e.State, ans))
 		}
 	}
 	if t.ID == s.Root && !terminal(s.RootState) {
@@ -632,11 +633,8 @@ func (s *State) setPlan(p *plan.Plan, now time.Time) {
 			s.comm(now, "hub", "", "", fmt.Sprintf("↑ escalate %s %s → %s", st.ID, was.Model, st.Model), st.ID)
 		}
 		if was.Status != st.Status {
-			switch st.Status {
-			case plan.Done:
-				s.comm(now, "hub", "", "", fmt.Sprintf("✓ %s merged into %s", st.ID, nonEmpty(p.Branch, "the run branch")), st.ID)
-			case plan.Conflict:
-				s.comm(now, "hub", "", "", "✗ "+st.ID+" merge conflict", st.ID)
+			if line := s.transition(st, was, p); line != "" {
+				s.comm(now, "hub", "", "", line, st.ID)
 			}
 		}
 	}
@@ -783,4 +781,72 @@ func subOf(e lg.Entry) string {
 		}
 	}
 	return plan.ParseTag(e.Summary)
+}
+
+// transition says in one line what a subtask's new status means and what happens
+// next, or "" when it needs no line.
+func (s *State) transition(st, was *plan.Subtask, p *plan.Plan) string {
+	lead, note := s.Short(s.Lead), firstLine(st.Note)
+	with := func(text string) string {
+		if note == "" {
+			return text
+		}
+		return text + ": " + note
+	}
+	switch st.Status {
+	case plan.Done:
+		left := 0
+		for _, o := range p.Subtasks {
+			if o.Status != plan.Done {
+				left++
+			}
+		}
+		next := fmt.Sprintf("%d to go", left)
+		if left == 0 {
+			next = "that was the last one: halo merges the run into your branch next"
+		}
+		return fmt.Sprintf("✓ %s merged into %s · %s", st.ID, nonEmpty(p.Branch, "the run branch"), next)
+	case plan.Conflict:
+		return with("✗ "+st.ID+" doesn't merge") + " · " + lead + " has its worker resolve it"
+	case plan.Ready:
+		if was.Status == plan.Paused {
+			return ""
+		}
+		return st.ID + " finished its work · " + lead + " sends it to review next (or accepts it if trivial)"
+	case plan.Review:
+		return st.ID + " is with " + s.Short(s.Reviewer) + " for review · approved means it merges"
+	case plan.Changes:
+		return with("↺ "+st.ID+" needs changes") + " · " + lead + " sends them back to its worker"
+	case plan.Failed:
+		return with("✗ "+st.ID+" failed") + " · " + lead + " decides what next (retry stronger, or ask you)"
+	case plan.Running:
+		if was.Status == plan.Pending {
+			return ""
+		}
+		if was.Status == plan.Paused {
+			return "▶ " + st.ID + " continues where it stopped"
+		}
+		return st.ID + " is back with its worker"
+	}
+	return ""
+}
+
+// ending is the line that says how the run ended and what you can do now.
+func (s *State) ending(state, answer string) string {
+	lead := s.Short(s.Lead)
+	switch state {
+	case stCompleted:
+		what := "run finished"
+		if r := s.Report; r != nil && r.Status != "" {
+			what += " · " + r.Status
+		}
+		return "✓ " + what + " · now: /summary reads it all · type to ask " + lead + " about it (no new run) · /new starts another"
+	case stCanceled:
+		return "■ run canceled · type to ask " + lead + " where it got to · /new starts another"
+	}
+	why := firstLine(answer)
+	if why == "" {
+		why = strings.ToLower(short(state))
+	}
+	return "✗ run ended: " + why + " · type to ask " + lead + " what happened (no new run) · /new starts another"
 }

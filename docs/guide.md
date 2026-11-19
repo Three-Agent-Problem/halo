@@ -168,9 +168,17 @@ When every subtask has been reviewed and merged into `halo/<run>`, Halo merges t
   git log --oneline --graph -10   # the run's merge on top
   ```
 
-The **run summary** opens on top: what each subtask built, wall time, review rounds, escalations and cost. `c` copies it as Markdown, `esc` closes it, and `/summary` brings it back.
+The **run summary** opens on top: what each subtask built, wall time, review rounds, escalations and cost. `o` opens all of it full screen (with the lead's final report and your questions), where `j`/`k`/`space` scroll and `a` asks the lead about it. `c` copies it as Markdown, `esc` closes it, and `/summary` brings it back.
+
+![The run summary, open full screen](screenshots/summary-reader.png)
+
+The run is over but the conversation isn't. Type anything and Halo asks: **ask the lead about this run** (`enter`), or **start a new run** (`r`). Asking starts nothing: the lead answers from the run's own Claude session, and the answer lands in comms and at the end of the summary. `/btw` does the same without the question.
+
+![Typing after a run](screenshots/after-run.png)
 
 Then press `i` for the next prompt. It asks y/n before starting the new run, which continues the same conversation, so the lead remembers this run. `/clear` starts fresh, and `/resume` reopens any past run; so does `o` in the runs list beside the full-screen comms (`4`, then `+` three times).
+
+Comms says in plain words what each ending means and what happens next: a subtask finished and goes to review, needs changes, failed and the lead decides, merged with N to go, and how the run ended.
 
 While a run works, `i` asks the lead a **btw**: a side question it answers between its steps, without a new run or a change to the plan. The answer lands in comms. `/new <prompt>` starts another run instead, after a y/n.
 

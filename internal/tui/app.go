@@ -99,6 +99,7 @@ type model struct {
 	cancelArm     time.Time
 	quitAsk       bool              // the quit dialog is open
 	summary       bool              // the run summary card is open
+	reader        *reader           // the run summary, open full screen
 	conn          *connWizard       // the /connections dialog, when open
 	tgPaired      bool              // a Telegram bot is paired (footer mark)
 	tgTip         bool              // the Telegram tip was shown this session
@@ -310,6 +311,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.fetch()
 	case loginMsg:
 		return m, m.loggedIn(msg)
+	case osc52Msg:
+		m.say(msg.what + " sent to your terminal's clipboard (if nothing pastes, your terminal ignores OSC 52)")
+		return m, tea.SetClipboard(msg.text)
 	case doneMsg:
 		if msg.err != nil {
 			m.say(msg.what + " failed: " + msg.err.Error())
@@ -382,6 +386,20 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if key == "ctrl+v" && m.inputText() && m.mode != modeName {
 		return m, m.clipImage(k)
 	}
+	if m.confirm != nil && m.confirm.ask != nil {
+		cf := m.confirm
+		switch key {
+		case "a", "A", "enter":
+			m.confirm = nil
+			return m, cf.ask()
+		case "r", "R":
+			m.confirm = nil
+			return m, cf.yes()
+		case "n", "N", "esc", "q":
+			m.confirm = nil
+		}
+		return m, nil
+	}
 	if m.confirm != nil {
 		cf := m.confirm
 		switch key {
@@ -399,14 +417,19 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.summary {
 		switch key {
 		case "c":
-			if r := m.st.summaryReport(); r != nil {
-				m.say("summary copied as Markdown")
-				return m, tea.SetClipboard(r.Markdown())
-			}
-		case "esc", "q", "enter":
+			return m, m.copyText(m.st.summaryMarkdown(), "summary")
+		case "o", "enter":
+			m.openReader()
+		case "a":
+			m.openReader()
+			return m, m.readerKey("a")
+		case "esc", "q":
 			m.summary = false
 		}
 		return m, nil
+	}
+	if m.reader != nil && m.mode == modeNormal {
+		return m, m.readerKey(key)
 	}
 	if m.picker != nil {
 		return m.pickerKey(k)
@@ -487,6 +510,12 @@ func (m *model) key(k tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.mode = modeNormal
 			if strings.HasPrefix(text, "/") {
 				return m, m.command(text)
+			}
+			if m.reader != nil {
+				// Asked while reading the summary: about this run, and the answer
+				// shows at the end of the summary.
+				m.reader.follow = true
+				return m, m.btw(text)
 			}
 			return m, m.submit(text)
 		}
@@ -783,27 +812,35 @@ func (m *model) submit(text string) tea.Cmd {
 	return m.startRun(text)
 }
 
-// btw asks the lead text on the side of the run on screen.
+// btw asks the lead text on the side of the run on screen. During the run the
+// lead answers between its steps; once the run is over it answers from the run's
+// conversation. Either way no run starts and nothing changes.
 func (m *model) btw(text string) tea.Cmd {
-	if !m.running() {
-		m.say("no run to ask about · just send it as a prompt")
+	if m.st.Root == "" {
+		m.say("no run on screen to ask about · send it as a prompt to start one")
 		return nil
 	}
 	text, _ = m.expandImages(ExpandMentions(text, m.shortMap()))
 	ctx, b, root, who := m.ctx, m.o.Backend, m.st.Root, m.st.Short(m.st.Lead)
-	return func() tea.Msg {
-		return doneMsg{"btw sent to " + who + " · it answers when it can", b.Btw(ctx, root, text)}
+	what := "btw sent to " + who + " · it answers between its steps, here in comms"
+	if !m.running() {
+		what = "asked " + who + " about this run · its answer shows here in comms; no new run"
 	}
+	return func() tea.Msg { return doneMsg{what, b.Btw(ctx, root, text)} }
 }
 
-// confirmRun asks before text starts a new run.
+// confirmRun asks before text starts a new run. With a finished run on screen it
+// offers to ask the lead about that run instead, which is the default.
 func (m *model) confirmRun(text string) tea.Cmd {
 	q := "Start a new run with this prompt?"
 	what := "The lead plans it and the team builds it, next to the run on screen."
+	cf := &confirm{title: "NEW RUN", q: q, what: what, yes: func() tea.Cmd { return m.startRun(text) }}
 	if !m.running() {
-		what = "The lead plans it in the same conversation, so it remembers this run."
+		cf.title, cf.q = "SEND", "Ask the lead about this run, or start a new run?"
+		cf.what = "Asking starts nothing: the lead answers from this run's conversation. A new run plans and builds."
+		cf.ask = func() tea.Cmd { return m.btw(text) }
 	}
-	m.confirm = &confirm{title: "NEW RUN", q: q, what: what, yes: func() tea.Cmd { return m.startRun(text) }}
+	m.confirm = cf
 	return nil
 }
 
@@ -818,15 +855,20 @@ func (m *model) startRun(text string) tea.Cmd {
 	}
 }
 
-// confirm is a y/n dialog in front of an action.
+// confirm is a y/n dialog in front of an action. With ask set it is a choice
+// instead: a/enter asks, r runs yes.
 type confirm struct {
 	title, q, what string
 	yes            func() tea.Cmd
+	ask            func() tea.Cmd
 }
 
 func (cf *confirm) box() []string {
-	lines := []string{"", "  " + c("hi!", cf.q), "  " + c("mute", cf.what), "",
-		"  " + c("fail!", "y") + c("mute", " yes   ") + c("reply!", "n") + c("mute", " no"), ""}
+	keys := "  " + c("fail!", "y") + c("mute", " yes   ") + c("reply!", "n") + c("mute", " no")
+	if cf.ask != nil {
+		keys = "  " + c("reply!", "a/⏎") + c("mute", " ask about this run   ") + c("ask!", "r") + c("mute", " new run   ") + c("dim", "esc") + c("mute", " cancel")
+	}
+	lines := []string{"", "  " + c("hi!", cf.q), "  " + c("mute", cf.what), "", keys, ""}
 	w := 4 + max(ansi.StringWidth(cf.q), ansi.StringWidth(cf.what)) + 4
 	return strings.Split(box(max(w, 40), len(lines)+2, c("ask!", cf.title), "", lines, true), "\n")
 }
@@ -1005,6 +1047,9 @@ func (m *model) render(now time.Time) string {
 	if m.summary && m.w >= 60 && m.h >= 16 {
 		sc.Overlay = m.st.summaryBox(min(m.w-8, 84), m.h-4)
 	}
+	if m.reader != nil && m.w >= 40 && m.h >= 12 {
+		sc.Overlay = m.readerBox(min(m.w-4, 110), m.h-2-strings.Count(sc.Footer, "\n")-2)
+	}
 	if m.confirm != nil && m.w >= 80 && m.h >= 24 {
 		sc.Overlay = m.confirm.box()
 	}
@@ -1033,12 +1078,16 @@ func (m *model) footer() string {
 	switch {
 	case m.quitAsk:
 		keys = k("y/⏎", "quit") + k("n/esc", "stay")
+	case m.confirm != nil && m.confirm.ask != nil:
+		keys = k("a/⏎", "ask about this run") + k("r", "new run") + k("esc", "cancel")
 	case m.confirm != nil:
 		keys = k("y/⏎", "yes") + k("n/esc", "no")
 	case m.conn != nil:
 		keys = k("esc", "close")
 	case m.summary:
-		keys = k("c", "copy as Markdown") + k("esc", "close")
+		keys = k("o/⏎", "open & scroll") + k("a", "ask about it") + k("c", "copy") + k("esc", "close")
+	case m.reader != nil && m.mode == modeNormal:
+		keys = k("a", "ask the lead") + k("↑↓ j/k space", "scroll") + k("c", "copy") + k("esc", "close")
 	case m.picker != nil:
 		keys = k("↑↓", "choose") + k("enter", "resume") + k("type", "filter") + k("esc", "close")
 	case m.ui.Help:

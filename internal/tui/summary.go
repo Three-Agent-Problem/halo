@@ -11,7 +11,8 @@ import (
 )
 
 // The run summary: the run's situation report (what it built, what it cost), as a
-// card that opens when the run lands and with /summary. c copies it as Markdown.
+// card that opens when the run lands and with /summary. o opens it full screen
+// (reader.go), a asks the lead about it, c copies it as Markdown.
 
 // summaryReport is the report with what only the TUI knows added: the team's cost.
 func (s *State) summaryReport() *report.Report {
@@ -104,7 +105,8 @@ func (s *State) summaryBox(w, maxH int) []string {
 			lines = append(lines, "  "+row)
 		}
 	}
-	lines = append(lines, "", "  "+c("reply!", "c")+c("mute", " copy as Markdown   ")+c("reply!", "esc")+c("mute", " close"), "")
+	lines = append(lines, "", "  "+c("reply!", "o")+c("mute", " open it all & scroll   ")+c("reply!", "a")+c("mute", " ask the lead about it   ")+
+		c("hub!", "c")+c("mute", " copy   ")+c("dim", "esc")+c("mute", " close"), "")
 	if len(lines)+2 > maxH {
 		lines = append(lines[:maxH-4], "  "+c("dim", "…"), "")
 	}

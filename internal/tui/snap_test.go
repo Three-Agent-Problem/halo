@@ -366,6 +366,11 @@ func TestSnapshot(t *testing.T) {
 			time.Sleep(time.Duration(n) * time.Second)
 			mu.Lock()
 			continue
+		case (m.summary || m.reader != nil) && len(k) == 1:
+			// keys of the summary card and the reader (o opens it all, j scrolls)
+			_, cmd := m.key(tea.KeyPressMsg{Code: rune(k[0]), Text: k})
+			_ = cmd
+			continue
 		case k == "pause":
 			// Claude's usage limit pauses the team: a running subtask waits, and
 			// Halo asks what to do (see host/limit.go).

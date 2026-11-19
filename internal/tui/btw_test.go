@@ -61,18 +61,36 @@ func TestPromptDuringRunIsBtw(t *testing.T) {
 	}
 }
 
-// After a run, a prompt starts a new one only after a y/n.
-func TestPromptAfterRunConfirmsNewRun(t *testing.T) {
+// After a run, a prompt asks what it is: by default a question about the run
+// (no new run), or with r a new run.
+func TestPromptAfterRun(t *testing.T) {
 	m, b := btwModel(t, stCompleted)
-	submitPrompt(m, "add dark mode")
-	if m.confirm == nil || b.sent != "" {
-		t.Fatalf("no y/n (confirm %v, sent %q)", m.confirm, b.sent)
+	submitPrompt(m, "why did S2 fail?")
+	if m.confirm == nil || m.confirm.ask == nil || b.sent != "" || b.asked != "" {
+		t.Fatalf("no choice (confirm %v, sent %q, asked %q)", m.confirm, b.sent, b.asked)
 	}
-	if _, cmd := m.key(tea.KeyPressMsg{Code: 'y', Text: "y"}); cmd != nil {
+	if _, cmd := m.key(tea.KeyPressMsg{Code: tea.KeyEnter}); cmd != nil {
+		cmd()
+	}
+	if b.asked != "why did S2 fail?" || b.root != "root-1" || b.sent != "" {
+		t.Fatalf("enter: asked %q under %q, sent %q", b.asked, b.root, b.sent)
+	}
+
+	submitPrompt(m, "add dark mode")
+	if _, cmd := m.key(tea.KeyPressMsg{Code: 'r', Text: "r"}); cmd != nil {
 		cmd()
 	}
 	if b.sent != "add dark mode" {
-		t.Fatalf("sent %q after y", b.sent)
+		t.Fatalf("sent %q after r", b.sent)
+	}
+}
+
+// /btw works on a finished run too: it asks about it.
+func TestBtwAfterRun(t *testing.T) {
+	m, b := btwModel(t, stCompleted)
+	submitPrompt(m, "/btw what changed?")
+	if b.asked != "what changed?" || m.confirm != nil {
+		t.Fatalf("asked %q, confirm %v", b.asked, m.confirm)
 	}
 }
 

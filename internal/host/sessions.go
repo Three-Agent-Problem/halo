@@ -1,7 +1,6 @@
 package host
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -49,20 +48,4 @@ func (f *sessionFile) put(key string, s a2aacp.Session) error {
 		return err
 	}
 	return os.Rename(tmp, f.path)
-}
-
-// scope is an a2aacp.SessionStore keyed by A2A context under prefix.
-func (f *sessionFile) scope(prefix string) a2aacp.SessionStore { return scopedSessions{f, prefix} }
-
-type scopedSessions struct {
-	f      *sessionFile
-	prefix string
-}
-
-func (s scopedSessions) Get(_ context.Context, contextID string) (a2aacp.Session, bool, error) {
-	return s.f.get(s.prefix + " " + contextID)
-}
-
-func (s scopedSessions) Put(_ context.Context, contextID string, sess a2aacp.Session) error {
-	return s.f.put(s.prefix+" "+contextID, sess)
 }

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -33,6 +34,7 @@ type lead struct {
 	agent  config.Agent
 	handle string
 	exec   *procs
+	sess   *leadSessions
 
 	mu    sync.Mutex
 	runs  map[string]*run   // by root platform task
@@ -49,7 +51,8 @@ type lead struct {
 }
 
 func (h *Host) newLead(ctx context.Context, a config.Agent, logw io.Writer) (*lead, error) {
-	l := &lead{h: h, agent: a, handle: h.handle(a), runs: map[string]*run{}, byCtx: map[string]*run{}, ctxOf: map[string]string{}}
+	l := &lead{h: h, agent: a, handle: h.handle(a), runs: map[string]*run{}, byCtx: map[string]*run{}, ctxOf: map[string]string{},
+		sess: &leadSessions{f: h.sessions}}
 	workers := map[string][]string{}
 	for _, w := range h.cfg.ByRole(config.RoleWorker) {
 		workers[w.Model] = append(workers[w.Model], "@"+h.handle(w))
@@ -67,7 +70,7 @@ func (h *Host) newLead(ctx context.Context, a config.Agent, logw io.Writer) (*le
 				"headers": []map[string]string{{"name": "Halo-Run", "value": delegate.Task(ctx)}}})
 			return a2aacp.SessionParams{Cwd: h.cfg.Repo, MCPServers: []json.RawMessage{srv}}, nil
 		},
-		SessionStore: h.sessions.scope("lead"),
+		SessionStore: l.sess,
 		Prompt: func(_ context.Context, ec *a2asrv.ExecutorContext) ([]*a2a.Part, error) {
 			if ec.StoredTask != nil {
 				return ec.Message.Parts, nil
@@ -281,15 +284,21 @@ func (l *lead) question(ctx context.Context, ec *a2asrv.ExecutorContext, m meta)
 // answers it with the answer tool between its other steps, and completes with
 // the answer.
 func (l *lead) btw(ctx context.Context, ec *a2asrv.ExecutorContext, m meta) iter.Seq2[a2a.Event, error] {
+	r := l.run(m.Run)
+	active := l.active()
+	switch {
+	case r != nil && slices.Contains(active, r):
+	case m.Run == "" && len(active) > 0:
+		r = active[0]
+	case m.Run != "":
+		// The run is over: the lead answers in its session, without a run.
+		return l.talk(ctx, ec, m)
+	default:
+		r = nil
+	}
 	return func(yield func(a2a.Event, error) bool) {
-		r := l.run(m.Run)
 		if r == nil {
-			if runs := l.active(); len(runs) > 0 {
-				r = runs[0]
-			}
-		}
-		if r == nil {
-			msg := a2a.NewMessageForTask(a2a.MessageRoleAgent, ec, a2a.NewTextPart("There is no active run to ask about: send it as a prompt instead."))
+			msg := a2a.NewMessageForTask(a2a.MessageRoleAgent, ec, a2a.NewTextPart("There is no run to ask about: send it as a prompt instead."))
 			yield(a2a.NewStatusUpdateEvent(ec, a2a.TaskStateFailed, msg), nil)
 			return
 		}
